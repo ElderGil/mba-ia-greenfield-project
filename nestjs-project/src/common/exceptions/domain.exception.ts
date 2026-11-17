@@ -48,3 +48,69 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found for user');
+  }
+}
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoAccessDeniedException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_ACCESS_DENIED',
+      403,
+      'You do not have permission to access this video',
+    );
+  }
+}
+
+export class VideoInvalidStateException extends DomainException {
+  constructor(message = 'Video is not in a valid state for this operation') {
+    super('VIDEO_INVALID_STATE', 409, message);
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video is not ready for playback');
+  }
+}
+
+export class UploadLimitExceededException extends DomainException {
+  constructor(maxBytes: number) {
+    super(
+      'UPLOAD_LIMIT_EXCEEDED',
+      413,
+      `Video file size exceeds maximum allowed limit of ${maxBytes} bytes`,
+    );
+  }
+}
+
+export class UnsupportedMediaTypeException extends DomainException {
+  constructor(mimeType: string) {
+    super(
+      'UNSUPPORTED_MEDIA_TYPE',
+      415,
+      `Unsupported video media type: ${mimeType}`,
+    );
+  }
+}
+
+export class InvalidUploadPartsException extends DomainException {
+  constructor(message = 'Invalid or incomplete multipart upload parts') {
+    super('INVALID_UPLOAD_PARTS', 400, message);
+  }
+}
+
+export class InvalidRangeException extends DomainException {
+  constructor(message = 'Requested byte range is invalid or unsatisfiable') {
+    super('INVALID_RANGE', 416, message);
+  }
+}
