@@ -1,16 +1,16 @@
 ---
 libs:
   "@nestjs/bullmq":
-    version: "^12.0.2"
-    source: "npm view @nestjs/bullmq@12.0.2 + NestJS official docs"
+    version: "^11.0.5"
+    source: "npm view @nestjs/bullmq@11.0.5 + NestJS official docs (CommonJS compatible with Jest/NestJS 11)"
     fetched_at: "2026-11-16T21:27:15-03:00"
   bullmq:
     version: "^6.7.6"
     source: "npm view bullmq@6.7.6 + BullMQ docs"
     fetched_at: "2026-11-16T21:27:15-03:00"
   ioredis:
-    version: "^6.0.0"
-    source: "npm view ioredis@6.0.0"
+    version: "^5.11.1"
+    source: "npm view ioredis@5.11.1 (peerOptional compatible with typeorm@0.3.28 and bullmq@6.7.6)"
     fetched_at: "2026-11-16T21:27:15-03:00"
   "@aws-sdk/client-s3":
     version: "^3.1169.0"
@@ -32,7 +32,7 @@ Distilled official API references for libraries decided in Phase 03 (`technical-
 
 ### @nestjs/bullmq
 
-**Version line:** `^12.0.2` (peerDependencies: `@nestjs/core ^10 || ^11 || ^12`, `bullmq ^3 || ^4 || ^5 || ^6`).
+**Version line:** `^11.0.5` (CommonJS build; peerDependencies: `@nestjs/core ^10 || ^11`, `bullmq ^3 || ^4 || ^5 || ^6`; avoids ESM-only Jest friction of v12).
 **Decided in:** `phase-03-videos/TD-01` (Option A — BullMQ + Redis).
 
 #### Root configuration (`BullModule.forRootAsync`)
@@ -111,7 +111,7 @@ export class VideoProcessingProcessor extends WorkerHost {
 
 ### ioredis
 
-**Version line:** `^6.0.0` (peer/runtime dependency used by BullMQ and health/cleanup probes if needed).
+**Version line:** `^5.11.1` (satisfies both `typeorm@0.3.28` `peerOptional ^5.0.4` and `bullmq@6.7.6` `>=5.0.0`).
 **Decided in:** `phase-03-videos/TD-01`.
 
 - BullMQ manages its own `ioredis` connections from `connection: { host, port, password }` — note BullMQ requires `maxRetriesPerRequest: null` on worker connections (automatically applied by BullMQ when passing plain `connection` options).
