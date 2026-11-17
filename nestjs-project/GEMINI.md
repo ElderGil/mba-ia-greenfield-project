@@ -28,8 +28,11 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
+- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
 - `mailpit` — Mailpit SMTP `1025`, UI `8025`
+- `minio` — S3-compatible object storage (`pgsty/silo`), API port `9000`, Console port `9001`
+- `redis` — Redis 7 (BullMQ queue backend), port `6379`
 
 ## Commands
 
@@ -41,6 +44,8 @@ Services:
 npm run start:dev
 npm run build
 npm run start:prod
+npm run start:worker:dev
+npm run start:worker
 npm test
 npm run test:watch
 npm run test:cov
@@ -84,3 +89,4 @@ Any non-TypeScript runtime asset (`.hbs`, JSON fixtures, etc.) must be declared 
 - **Prettier:** single quotes, trailing commas everywhere
 - **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings
 - **REST Conventions:** standard HTTP methods, proper status codes, plural resource nouns, OpenAPI decorators (`@ApiTags`, `@ApiOperation`, `@ApiResponse`, `@ApiBearerAuth`, `ApiErrorEnvelope`).
+

@@ -8,23 +8,23 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 ## Repository Structure
 
-This is a monorepo with two main areas:
+This is a monorepo with three main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
-- `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `nestjs-project/` — Backend API & Video Worker (NestJS 11, TypeScript, Express, TypeORM, BullMQ, AWS SDK v3, FFmpeg). Contains modules `auth/`, `users/`, `channels/`, `mail/`, `storage/`, `videos/`, `common/`, `config/`, `database/`, `swagger/`, plus `worker.main.ts` / `worker.module.ts`.
+- `docs/` — Project documentation, architecture diagrams, technical decisions, and planning (`docs/phases/phase-03-videos/`).
+- `next-frontend/` (Next.js 16) — Fases 01–02 (fora do escopo da Fase 03).
 
 ## Architecture (C4 Container Diagram)
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
-- **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
-- **Email Service** (SMTP) → account confirmation and password recovery
+- **Frontend** (Next.js) → calls API via REST, streams from API / Object Storage
+- **API** (Nest.js `nestjs-api`) → business rules, auth, reads/writes DB, issues S3 presigned multipart URLs, streams byte-range playback (`206`) & downloads, publishes jobs to queue, sends emails
+- **Video Worker** (Nest.js `video-worker` + FFmpeg/ffprobe) → consumes `video-processing` jobs from BullMQ/Redis, extracts duration/metadata and JPEG thumbnail, updates DB and storage
+- **Database** (PostgreSQL 17) → `users`, `channels`, `refresh_tokens`, `verification_tokens`, `videos`
+- **Object Storage** (S3-compatible / MinIO via `pgsty/silo`) → private bucket `streamtube-media` (`videos/{channelId}/{videoId}/...`, `thumbnails/{channelId}/{videoId}/thumb.jpg`)
+- **Message Queue** (BullMQ + Redis 7) → `video-processing` job queue (`process-video`)
+- **Email Service** (SMTP / Mailpit) → account confirmation and password recovery
 
 ## Docker Networking
 
