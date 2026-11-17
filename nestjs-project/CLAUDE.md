@@ -33,7 +33,11 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
+- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — Mailpit SMTP `1025`, Web UI `8025`
+- `minio` — S3-compatible object storage (`pgsty/silo`), API port `9000`, Console port `9001`
+- `redis` — Redis 7 (BullMQ queue backend), port `6379`
 
 All verification and teardown commands run on the **host machine**:
 
@@ -62,6 +66,8 @@ docker compose down
 npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
+npm run start:worker:dev                 # Run BullMQ FFmpeg video worker (dev)
+npm run start:worker                     # Run compiled BullMQ FFmpeg video worker
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
@@ -146,8 +152,10 @@ Whenever possible, prefer storing only the bare address in `.env` and composing 
 
 NestJS with standard module structure. Source lives in `src/`, compiled output in `dist/`.
 
-- Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
-- Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+- Each domain feature gets its own module (`AuthModule`, `UsersModule`, `ChannelsModule`, `MailModule`, `StorageModule`, `VideosModule`) registered in `AppModule`
+- `WorkerModule` (`src/worker.main.ts`) runs the standalone BullMQ consumer (`VideoProcessingProcessor` + `MediaProcessorService` using `ffmpeg`/`ffprobe`) in the `video-worker` container
+- `StorageModule` (`S3StorageService`) wraps `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` for MinIO/S3 multipart uploads, presigned URLs, and byte-range streaming
+- Controllers handle HTTP routing (`VideosController`, `AuthController`); Services hold business logic; both are scoped to their module
 
 ## Code Conventions
 

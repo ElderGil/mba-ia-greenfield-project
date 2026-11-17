@@ -89,4 +89,21 @@ describe('ChannelsService (integration)', () => {
       expect(channels).toHaveLength(2);
     });
   });
+
+  describe('findByUserId', () => {
+    it('returns the channel owned by the user or null when absent', async () => {
+      const user = await createUser();
+      const missing = await channelsService.findByUserId(user.id);
+      expect(missing).toBeNull();
+
+      const created = await channelsService.createChannel(
+        user.id,
+        'owner@example.com',
+      );
+      const found = await channelsService.findByUserId(user.id);
+      expect(found).not.toBeNull();
+      expect(found!.id).toBe(created.id);
+      expect(found!.nickname).toBe('owner');
+    });
+  });
 });

@@ -1,0 +1,287 @@
+import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
+import { ChannelsService } from '../channels/channels.service';
+import {
+  ChannelNotFoundException,
+  InvalidUploadPartsException,
+  UnsupportedMediaTypeException,
+  UploadLimitExceededException,
+  VideoAccessDeniedException,
+  VideoInvalidStateException,
+  VideoNotFoundException,
+} from '../common/exceptions/domain.exception';
+import videoConfig from '../config/video.config';
+import { S3StorageService } from '../storage/s3-storage.service';
+import { Video, VideoStatus } from './entities/video.entity';
+import { VideosQueueService } from './videos-queue.service';
+import { VideosUploadService } from './videos-upload.service';
+
+describe('VideosUploadService', () => {
+  let service: VideosUploadService;
+
+  const mockVideoRepo = {
+    create: jest.fn((input: Partial<Video>) => ({ ...input })),
+    save: jest.fn(),
+    findOne: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+  };
+
+  const mockChannelsService = {
+    findByUserId: jest.fn(),
+  };
+
+  const mockStorageService = {
+    createMultipartUpload: jest.fn(),
+    getPresignedPartUrl: jest.fn(),
+    completeMultipartUpload: jest.fn(),
+    abortMultipartUpload: jest.fn(),
+    headObject: jest.fn(),
+    deleteObject: jest.fn(),
+  };
+
+  const mockQueueService = {
+    enqueueProcessVideo: jest.fn(),
+  };
+
+  const cfg = {
+    maxFileSizeBytes: 10 * 1024 * 1024 * 1024,
+    defaultPartSizeBytes: 10 * 1024 * 1024,
+    presignedUrlExpiresInSeconds: 900,
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosUploadService,
+        { provide: getRepositoryToken(Video), useValue: mockVideoRepo },
+        { provide: ChannelsService, useValue: mockChannelsService },
+        { provide: S3StorageService, useValue: mockStorageService },
+        { provide: VideosQueueService, useValue: mockQueueService },
+        { provide: videoConfig.KEY, useValue: cfg },
+      ],
+    }).compile();
+
+    service = module.get(VideosUploadService);
+  });
+
+  describe('initiateUpload', () => {
+    it('rejects unsupported MIME types with UnsupportedMediaTypeException', async () => {
+      await expect(
+        service.initiateUpload('u1', {
+          title: 'Bad',
+          filename: 'doc.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toThrow(UnsupportedMediaTypeException);
+      expect(mockChannelsService.findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('rejects files over 10 GiB with UploadLimitExceededException', async () => {
+      await expect(
+        service.initiateUpload('u1', {
+          title: 'Huge',
+          filename: 'huge.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: cfg.maxFileSizeBytes + 1,
+        }),
+      ).rejects.toThrow(UploadLimitExceededException);
+      expect(mockChannelsService.findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('throws ChannelNotFoundException when user has no channel', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue(null);
+
+      await expect(
+        service.initiateUpload('u1', {
+          title: 'Demo',
+          filename: 'demo.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 2048,
+        }),
+      ).rejects.toThrow(ChannelNotFoundException);
+    });
+
+    it('retries short_code collision and compensates draft on S3 failure', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      const uniqueErr = new QueryFailedError('INSERT', [], new Error('dup'));
+      Object.assign(uniqueErr, {
+        code: '23505',
+        detail: 'Key (short_code)=(abc) already exists.',
+      });
+
+      mockVideoRepo.save
+        .mockRejectedValueOnce(uniqueErr)
+        .mockResolvedValueOnce({
+          id: 'vid-1',
+          channel_id: 'chan-1',
+          short_code: 'AbCdEf12345',
+          status: VideoStatus.DRAFT,
+        });
+      mockStorageService.createMultipartUpload.mockRejectedValueOnce(
+        new Error('S3 down'),
+      );
+
+      await expect(
+        service.initiateUpload('u1', {
+          title: 'Demo',
+          filename: 'demo.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 2048,
+        }),
+      ).rejects.toThrow('S3 down');
+
+      expect(mockVideoRepo.save).toHaveBeenCalledTimes(2);
+      expect(mockVideoRepo.delete).toHaveBeenCalledWith({ id: 'vid-1' });
+    });
+
+    it('creates draft video and initiates S3 multipart upload', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.save.mockImplementation((v: Partial<Video>) =>
+        Promise.resolve({ id: 'vid-1', ...v }),
+      );
+      mockStorageService.createMultipartUpload.mockResolvedValue('upload-123');
+
+      const result = await service.initiateUpload('u1', {
+        title: 'My Video',
+        filename: 'clip.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 5000,
+      });
+
+      expect(result.videoId).toBe('vid-1');
+      expect(result.shortCode).toMatch(/^[A-Za-z0-9_-]{11}$/);
+      expect(result.status).toBe(VideoStatus.DRAFT);
+      expect(result.uploadId).toBe('upload-123');
+      expect(result.storageKey).toBe('videos/chan-1/vid-1/original.mp4');
+      expect(result.partSizeBytes).toBe(cfg.defaultPartSizeBytes);
+      expect(result.maxParts).toBe(10000);
+    });
+  });
+
+  describe('signUploadPart / completeUpload / abortUpload guards', () => {
+    it('throws VideoNotFoundException when video does not exist', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.signUploadPart('u1', 'missing', 1)).rejects.toThrow(
+        VideoNotFoundException,
+      );
+    });
+
+    it('throws VideoAccessDeniedException for another channel video', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue({
+        id: 'vid-1',
+        channel_id: 'chan-other',
+        status: VideoStatus.DRAFT,
+        upload_id: 'up-1',
+        storage_key: 'videos/chan-other/vid-1/original.mp4',
+      });
+
+      await expect(service.signUploadPart('u1', 'vid-1', 1)).rejects.toThrow(
+        VideoAccessDeniedException,
+      );
+    });
+
+    it('throws VideoInvalidStateException when video is not draft', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue({
+        id: 'vid-1',
+        channel_id: 'chan-1',
+        status: VideoStatus.PROCESSING,
+        upload_id: null,
+        storage_key: 'videos/chan-1/vid-1/original.mp4',
+      });
+
+      await expect(
+        service.completeUpload('u1', 'vid-1', [
+          { partNumber: 1, etag: '"e1"' },
+        ]),
+      ).rejects.toThrow(VideoInvalidStateException);
+    });
+
+    it('rejects duplicate part numbers on completeUpload', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue({
+        id: 'vid-1',
+        channel_id: 'chan-1',
+        status: VideoStatus.DRAFT,
+        upload_id: 'up-1',
+        storage_key: 'videos/chan-1/vid-1/original.mp4',
+      });
+
+      await expect(
+        service.completeUpload('u1', 'vid-1', [
+          { partNumber: 1, etag: '"e1"' },
+          { partNumber: 1, etag: '"e2"' },
+        ]),
+      ).rejects.toThrow(InvalidUploadPartsException);
+    });
+
+    it('completes upload, updates status atomically, and enqueues BullMQ job', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue({
+        id: 'vid-1',
+        channel_id: 'chan-1',
+        short_code: 'ShortCode11',
+        status: VideoStatus.DRAFT,
+        upload_id: 'up-1',
+        storage_key: 'videos/chan-1/vid-1/original.mp4',
+        mime_type: 'video/mp4',
+      });
+      mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
+      mockStorageService.headObject.mockResolvedValue({
+        contentLength: 4096,
+        contentType: 'video/mp4',
+        etag: '"final"',
+      });
+      mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+      mockQueueService.enqueueProcessVideo.mockResolvedValue(
+        'process-video-vid-1',
+      );
+
+      const res = await service.completeUpload('u1', 'vid-1', [
+        { partNumber: 1, etag: '"e1"' },
+      ]);
+
+      expect(res).toEqual({
+        videoId: 'vid-1',
+        shortCode: 'ShortCode11',
+        status: VideoStatus.PROCESSING,
+        jobId: 'process-video-vid-1',
+      });
+      expect(mockQueueService.enqueueProcessVideo).toHaveBeenCalledWith({
+        videoId: 'vid-1',
+        channelId: 'chan-1',
+        storageKey: 'videos/chan-1/vid-1/original.mp4',
+        mimeType: 'video/mp4',
+      });
+    });
+
+    it('aborts multipart upload and deletes draft record', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.findOne.mockResolvedValue({
+        id: 'vid-1',
+        channel_id: 'chan-1',
+        status: VideoStatus.DRAFT,
+        upload_id: 'up-1',
+        storage_key: 'videos/chan-1/vid-1/original.mp4',
+      });
+
+      await service.abortUpload('u1', 'vid-1');
+
+      expect(mockStorageService.abortMultipartUpload).toHaveBeenCalledWith(
+        'videos/chan-1/vid-1/original.mp4',
+        'up-1',
+      );
+      expect(mockVideoRepo.delete).toHaveBeenCalledWith({
+        id: 'vid-1',
+        status: VideoStatus.DRAFT,
+      });
+    });
+  });
+});
