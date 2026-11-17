@@ -1,0 +1,100 @@
+# GEMINI.md
+
+> Portado de [CLAUDE.md](./CLAUDE.md) para a convenção do **Antigravity** (usando o modelo **Gemini 4 Hydrogen**). Mantido sincronizado com `CLAUDE.md`.
+
+## Project Overview
+
+StreamTube — a video sharing platform (YouTube-like). Users can upload, manage, and publish videos. Anonymous users can watch freely; social features (comments, subscriptions, likes) require authentication.
+
+More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
+
+## Repository Structure
+
+This is a monorepo with three main areas:
+
+- `nestjs-project/` — Backend API & Video Worker (NestJS 11, TypeScript, Express, TypeORM, BullMQ, AWS SDK v3, FFmpeg). Contains modules `auth/`, `users/`, `channels/`, `mail/`, `storage/`, `videos/`, `common/`, `config/`, `database/`, `swagger/`, plus `worker.main.ts` / `worker.module.ts`.
+- `docs/` — Project documentation, architecture diagrams, technical decisions, and planning (`docs/phases/phase-03-videos/`).
+- `next-frontend/` (Next.js 16) — Fases 01–02 (fora do escopo da Fase 03).
+
+## Architecture (C4 Container Diagram)
+
+See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
+
+- **Frontend** (Next.js) → calls API via REST, streams from API / Object Storage
+- **API** (Nest.js `nestjs-api`) → business rules, auth, reads/writes DB, issues S3 presigned multipart URLs, streams byte-range playback (`206`) & downloads, publishes jobs to queue, sends emails
+- **Video Worker** (Nest.js `video-worker` + FFmpeg/ffprobe) → consumes `video-processing` jobs from BullMQ/Redis, extracts duration/metadata and JPEG thumbnail, updates DB and storage
+- **Database** (PostgreSQL 17) → `users`, `channels`, `refresh_tokens`, `verification_tokens`, `videos`
+- **Object Storage** (S3-compatible / MinIO via `pgsty/silo`) → private bucket `streamtube-media` (`videos/{channelId}/{videoId}/...`, `thumbnails/{channelId}/{videoId}/thumb.jpg`)
+- **Message Queue** (BullMQ + Redis 7) → `video-processing` job queue (`process-video`)
+- **Email Service** (SMTP / Mailpit) → account confirmation and password recovery
+
+## Docker Networking
+
+This project runs entirely in Docker containers. When configuring connections between services (database, cache, queue, etc.), **always use the Docker Compose service name** as the host — never `localhost` or `127.0.0.1`.
+
+Inside a container, `localhost` refers to the container itself, not the host machine or other containers. Services communicate through the Docker Compose network using their service names (e.g., `db`, `nestjs-api`).
+
+- **Correct:** `DB_HOST=db` (the Compose service name)
+- **Wrong:** `DB_HOST=localhost`
+
+This applies to all environment variables, configuration files, and code that references service hosts.
+
+## Working Principles
+
+- **Single Responsibility:** each module, service, and function should have a clear, focused responsibility. Re-evaluate adherence at every step — when a module starts owning logic or entities that are not its own (e.g., a service creating an entity from another domain), extract it immediately into the proper module instead of deferring to a later corrective task.
+- **Type Safety:** Strict TypeScript usage across all layers.
+- **Testing:** Strong emphasis on pyramid testing at all levels to ensure reliability and maintainability.
+- **Code Quality:** Use ESLint and Prettier for consistent code style. Code reviews should focus on readability, maintainability, and adherence to best practices.
+- **Documentation:** Comprehensive docs for architecture, setup, and troubleshooting in `docs/`.
+
+## Definition of Done (Technical)
+
+A change is only considered complete when **all** of the following pass:
+
+1. The relevant test suite passes (unit + integration + e2e affected by the change).
+2. The full test suite passes before finishing the task.
+3. TypeScript compiles cleanly: `npx tsc --noEmit` exits with code 0. Compilation errors must never be left as debt for future tasks.
+4. Lint passes: `npm run lint`.
+
+If any of these fails, the task is not done — fix the underlying issue before declaring completion.
+
+## Git Conventions
+
+- **Main branch:** `main` — never commit directly to it
+- Branches: `feature/*`, `bugfix/*`, `hotfix/*`, `docs/*`
+- **Commits:** short, descriptive messages focused on the "why" of the change
+- **Workflow:** Git Flow conventions. Two long-lived branches:
+  - `main` — stable, production-ready code
+  - `dev` — integration branch; all feature/bugfix/hotfix branches start from `dev` and merge back into `dev`
+  - When `dev` is stable, it is merged into `main`
+
+## Testing Policy
+
+Every change must be tested. During development, run only the tests related to the modified code. Before finishing, always run the full test suite to ensure nothing is broken.
+
+## Scope Limits
+
+- Work on **one feature, fix, or refactoring at a time** — do not mix scopes
+- Do not include cosmetic changes (formatting, renaming) alongside functional changes
+- If something out of scope comes up during work, note it as a separate task instead of acting on it
+- Focus on the defined scope for each task to ensure clarity and maintainability of the codebase.
+- If you identify a necessary change that is out of scope, create a new issue or task for it instead of including it in the current work.
+
+## Antigravity Ported Foundation (`.agents/`)
+
+As skills e regras originais de `.claude/` foram portadas para a convenção do Antigravity:
+
+- **Skills do workflow e domínio:** `.agents/skills/` (cópia das skills `research`, `plan-context`, `plan-validate`, `plan-resolve`, `plan-build`, `plan-test-specs`, `plan-pipeline`, `implement`, `implement-phase`, `decide`, `nestjs-best-practices`, `typeorm`, `testing-guide-nestjs-project`, etc.).
+- **Regras de código e testes:** `.agents/rules/` (portadas de `.claude/rules/`). Antes de editar arquivos NestJS/TypeORM/testes, ler as regras aplicáveis em `.agents/rules/`.
+- **Subagents de leitura:** referenciados em `.claude/agents/` (`decisions-reader`, `decisions-detail-reader`, `decisions-correlator`, `phases-reader`, `plan-reader`); quando a ferramenta usar `invoke_subagent` ou leitura direta equivalente, seguir os mesmos contratos de retorno estruturado.
+
+## Library Documentation Lookup
+
+Before implementing any feature, consult official documentation for the exact installed/target library version (via Context7 MCP when configured, or official docs / npm registry / `search_web` quando Context7 não estiver montado no harness).
+
+Always:
+- Check the installed library version in the project manifest (`package.json` / `package-lock.json`)
+- Retrieve the corresponding official documentation
+- Cross-reference APIs to avoid deprecated or incompatible patterns
+- Follow the official documentation over training data
+
