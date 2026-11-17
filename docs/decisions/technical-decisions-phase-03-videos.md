@@ -26,7 +26,7 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: BullMQ (`@nestjs/bullmq` + `bullmq` + Redis)
-- Redis-backed distributed job queue using the official `@nestjs/bullmq` (`12.0.2`, native NestJS 11 support) and `bullmq` (`6.7.6`) packages. Jobs are persisted in Redis, processed by a dedicated worker consumer, and support exponential backoff retries, concurrency limits, and job failure hooks out of the box.
+- Redis-backed distributed job queue using the official `@nestjs/bullmq` (`11.0.5`, NestJS 11 support, CommonJS) and `bullmq` (`6.7.6`) packages. Jobs are persisted in Redis, processed by a dedicated worker consumer, and support exponential backoff retries, concurrency limits, and job failure hooks out of the box.
 - **Pros:** First-class official NestJS integration (`BullModule.forRootAsync`, `@Processor`, `@InjectQueue`), built-in retry/backoff and failed-job retention, clean isolation from PostgreSQL, simple single-container Redis dependency in Docker Compose.
 - **Cons:** Introduces Redis as a new infrastructure service in `compose.yaml` (extra container and env vars).
 
@@ -40,9 +40,11 @@ _Subprojects in scope:_
 - **Pros:** Strong routing semantics and protocol-level acknowledgments; suitable for polyglot microservice architectures.
 - **Cons:** Higher operational/RAM footprint in local Docker Compose; retry with exponential backoff and dead-letter topologies require manual exchange/TTL plumbing whereas BullMQ provides them declaratively.
 
-**Recommendation:** **Option A (BullMQ + Redis)** — `@nestjs/bullmq` (`12.0.2`) officially targets NestJS 11, provides declarative retries/backoff and stalled-job handling, and keeps background job polling off PostgreSQL with a lightweight `redis:7-alpine` container.
+**Recommendation:** **Option A (BullMQ + Redis)** — `@nestjs/bullmq` officially supports NestJS 11, provides declarative retries/backoff and stalled-job handling, and keeps background job polling off PostgreSQL with a lightweight `redis:7-alpine` container.
 
 **Decision:** A (BullMQ + Redis via `@nestjs/bullmq`, `bullmq`, `ioredis`)
+
+> **Revision (2026-11-17, peer review):** the version actually pinned is `@nestjs/bullmq@^11.0.5`, not `12.0.2`. `12.x` ships ESM-only and breaks Jest in this CommonJS project (recorded in `phase-03-videos/progress.md`, SI-03.1). `11.0.5` declares `@nestjs/core ^10 || ^11` and `bullmq ^3 || ^4 || ^5 || ^6` as peers, so the decision (BullMQ + Redis) stands; only the version line changed. `ioredis` is `^5.11.1`.
 
 **Libraries:** @nestjs/bullmq, bullmq, ioredis
 
@@ -76,6 +78,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (S3 Multipart Upload with Presigned Part URLs)** — Single `PUT` caps at 5GB and cannot meet the 10GB requirement; S3 multipart keeps 100% of binary upload traffic off the NestJS API and supports per-part resume without extra server containers.
 
 **Decision:** A (S3 Multipart Upload with Presigned Part URLs; max 10 GiB / 10,737,418,240 bytes, default 10 MiB part size, allowed MIME types `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`)
+
+> **Revision (2026-11-17, peer review):** presigned part URLs embed the host they were signed for, the same SigV4 constraint that rules out presigned GET in TD-07. The API signs part URLs with a dedicated client bound to `S3_PUBLIC_ENDPOINT` (falls back to `S3_ENDPOINT`, i.e. `minio:9000`, which only resolves inside the Compose network). Clients on the host need `S3_PUBLIC_ENDPOINT=http://localhost:9000`; the test suites run inside the `nestjs-api` container and need it empty. In production it is the public S3 endpoint, and browser uploads additionally need bucket CORS exposing `ETag` (out of scope while the upload UI is not built).
 
 **Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
@@ -121,7 +125,7 @@ _Subprojects in scope:_
 
 ### Option A: 4-State Lifecycle (`draft` → `processing` → `ready` | `failed`)
 - `POST /videos/uploads/initiate` persists the `Video` entity owned by the authenticated user's channel with `status = 'draft'` and a unique `shortCode`.
-- `POST /videos/:id/uploads/complete` completes the S3 multipart upload, verifies object metadata (`HeadObject`), atomically transitions `draft` → `processing` (guarding against duplicate completes on non-`draft` rows), and enqueues the BullMQ `process-video` job.
+- `POST /videos/:id/uploads/complete` first claims the row with a conditional `UPDATE ... SET status = 'processing' WHERE id = :id AND status = 'draft'` (the claim is the lock against concurrent completes: the loser gets `409` and never touches S3), then completes the S3 multipart upload, verifies object metadata (`HeadObject`), and enqueues the BullMQ `process-video` job. If S3 rejects the parts the row goes back to `draft` (the multipart upload is still open, so the client can retry); if the enqueue fails the row goes to `failed` with `processingError`, so no video stays in `processing` without a job.
 - The worker updates metadata + `thumbnailKey` and sets `status = 'ready'` on success; if retries exhaust (or media is invalid/corrupt), a failure handler records `status = 'failed'` and `processingError`. Failed or aborted uploads can re-initiate or remain inspectable via status endpoint.
 - **Pros:** Matches `project-plan.md` terminology (`draft` / rascunho) and Phase 04's publishing workflow; prevents duplicate job enqueue via conditional state check; surfaces explicit `failed` state with error reason.
 - **Cons:** Does not separate "upload started" from "draft metadata edited before upload" (both are `draft` until `complete` is called, which is sufficient for Phase 03).
