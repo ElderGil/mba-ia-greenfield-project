@@ -2,23 +2,23 @@
 libs:
   "@nestjs/bullmq":
     version: "^11.0.5"
-    source: "npm view @nestjs/bullmq@11.0.5 + NestJS official docs (CommonJS compatible with Jest/NestJS 11)"
+    source: "context7 /nestjs/docs.nestjs.com (branch 11.0.0, techniques/queues) + npm view @nestjs/bullmq@11.0.5 (CommonJS, Jest-compatible)"
     fetched_at: "2026-11-16T21:27:15-03:00"
   bullmq:
     version: "^6.7.6"
-    source: "npm view bullmq@6.7.6 + BullMQ docs"
+    source: "context7 /taskforcesh/bullmq (v6.3.11; installed 6.7.6) + npm view bullmq@6.7.6"
     fetched_at: "2026-11-16T21:27:15-03:00"
   ioredis:
     version: "^5.11.1"
-    source: "npm view ioredis@5.11.1 (peerOptional compatible with typeorm@0.3.28 and bullmq@6.7.6)"
+    source: "npm view ioredis@5.11.1 (peerOptional compatible with typeorm@0.3.28 and bullmq@6.7.6); maxRetriesPerRequest behaviour confirmed in context7 /taskforcesh/bullmq"
     fetched_at: "2026-11-16T21:27:15-03:00"
   "@aws-sdk/client-s3":
-    version: "^3.1169.0"
-    source: "npm view @aws-sdk/client-s3@3.1169.0 + AWS SDK v3 docs"
+    version: "^3.1170.0"
+    source: "context7 /aws/aws-sdk-js-v3 (v3.1153.0; installed 3.1170.0) + npm view @aws-sdk/client-s3@3.1170.0"
     fetched_at: "2026-11-16T21:27:15-03:00"
   "@aws-sdk/s3-request-presigner":
-    version: "^3.1169.0"
-    source: "npm view @aws-sdk/s3-request-presigner@3.1169.0 + AWS SDK v3 docs"
+    version: "^3.1170.0"
+    source: "context7 /aws/aws-sdk-js-v3 (v3.1153.0, packages/s3-request-presigner README; installed 3.1170.0) + npm view @aws-sdk/s3-request-presigner@3.1170.0"
     fetched_at: "2026-11-16T21:27:15-03:00"
 sources_mtime:
   docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-16T21:27:05-0300"
@@ -27,6 +27,8 @@ sources_mtime:
 # phase-03-videos — Library References
 
 Distilled official API references for libraries decided in Phase 03 (`technical-decisions-phase-03-videos.md`). Verified against npm registry compatibility with `@nestjs/core ^11.0.1` and Node.js 25.
+
+> **Re-verification (2026-11-17, peer review):** the first version of this file cited only `npm view` + docs, because context7 was not configured in the Antigravity MCP config. The APIs below were re-checked through context7. Version gaps between the context7 index and the installed packages, flagged per `CLAUDE.md` → Library Documentation Lookup: `bullmq` (context7 v6.3.11, installed 6.7.6) and `@aws-sdk/*` (context7 v3.1153.0, installed 3.1170.0). The installed versions are the ones exercised by the unit, integration and e2e suites against real Redis and MinIO.
 
 ---
 
@@ -120,7 +122,7 @@ export class VideoProcessingProcessor extends WorkerHost {
 
 ### @aws-sdk/client-s3
 
-**Version line:** `^3.1169.0`.
+**Version line:** `^3.1170.0`.
 **Decided in:** `phase-03-videos/TD-02`, `phase-03-videos/TD-03`, `phase-03-videos/TD-07`.
 
 #### Client setup for MinIO + AWS S3
@@ -154,7 +156,7 @@ const s3Client = new S3Client({
 
 ### @aws-sdk/s3-request-presigner
 
-**Version line:** `^3.1169.0`.
+**Version line:** `^3.1170.0`.
 **Decided in:** `phase-03-videos/TD-02`, `phase-03-videos/TD-03`.
 
 ```typescript

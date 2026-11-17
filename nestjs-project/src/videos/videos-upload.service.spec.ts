@@ -262,6 +262,74 @@ describe('VideosUploadService', () => {
       });
     });
 
+    describe('completeUpload failure paths', () => {
+      const draftVideo = {
+        id: 'vid-1',
+        channel_id: 'chan-1',
+        short_code: 'ShortCode11',
+        status: VideoStatus.DRAFT,
+        upload_id: 'up-1',
+        storage_key: 'videos/chan-1/vid-1/original.mp4',
+        mime_type: 'video/mp4',
+      };
+      const parts = [{ partNumber: 1, etag: '"e1"' }];
+
+      beforeEach(() => {
+        mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+        mockVideoRepo.findOne.mockResolvedValue({ ...draftVideo });
+      });
+
+      it('should throw VideoInvalidStateException without touching S3 when a concurrent complete already claimed the draft', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 0 });
+
+        await expect(
+          service.completeUpload('u1', 'vid-1', parts),
+        ).rejects.toThrow(VideoInvalidStateException);
+        expect(
+          mockStorageService.completeMultipartUpload,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('should revert the claim to draft when storage rejects the parts', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockStorageService.completeMultipartUpload.mockRejectedValue(
+          Object.assign(new Error('bad part'), { name: 'InvalidPart' }),
+        );
+
+        await expect(
+          service.completeUpload('u1', 'vid-1', parts),
+        ).rejects.toThrow(InvalidUploadPartsException);
+        expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
+          { id: 'vid-1', status: VideoStatus.PROCESSING },
+          { status: VideoStatus.DRAFT },
+        );
+      });
+
+      it('should mark the video failed when the processing job cannot be enqueued', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
+        mockStorageService.headObject.mockResolvedValue({
+          contentLength: 4096,
+          contentType: 'video/mp4',
+        });
+        const queueDown = new Error('Redis connection refused');
+        mockQueueService.enqueueProcessVideo.mockRejectedValue(queueDown);
+
+        await expect(
+          service.completeUpload('u1', 'vid-1', parts),
+        ).rejects.toThrow(queueDown);
+        expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
+          { id: 'vid-1', status: VideoStatus.PROCESSING },
+          {
+            status: VideoStatus.FAILED,
+            processing_error: expect.stringContaining(
+              'Redis connection refused',
+            ) as string,
+          },
+        );
+      });
+    });
+
     it('aborts multipart upload and deletes draft record', async () => {
       mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
       mockVideoRepo.findOne.mockResolvedValue({
