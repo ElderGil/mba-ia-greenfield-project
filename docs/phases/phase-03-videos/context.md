@@ -76,7 +76,7 @@ _Source files:_
 
 ### phase-03-videos/TD-01
 
-**Recommendation:** BullMQ + Redis — `@nestjs/bullmq` (`12.0.2`) officially targets NestJS 11, provides declarative retries/backoff and stalled-job handling, and keeps background job polling off PostgreSQL with a lightweight `redis:7-alpine` container.
+**Recommendation:** BullMQ + Redis — `@nestjs/bullmq` (pinned `^11.0.5`; `12.x` is ESM-only and breaks Jest, see TD-01 revision) officially supports NestJS 11, provides declarative retries/backoff and stalled-job handling, and keeps background job polling off PostgreSQL with a lightweight `redis:7-alpine` container.
 
 **Libraries:** `@nestjs/bullmq`, `bullmq`, `ioredis`
 

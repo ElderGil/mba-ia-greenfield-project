@@ -87,6 +87,6 @@ Any non-TypeScript runtime asset (`.hbs`, JSON fixtures, etc.) must be declared 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
 - **Decorators:** `emitDecoratorMetadata` + `experimentalDecorators` enabled
 - **Prettier:** single quotes, trailing commas everywhere
-- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings
+- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings; in test files `jest/unbound-method` (eslint-plugin-jest) replaces `@typescript-eslint/unbound-method`, so `expect(mock.method)` is allowed
 - **REST Conventions:** standard HTTP methods, proper status codes, plural resource nouns, OpenAPI decorators (`@ApiTags`, `@ApiOperation`, `@ApiResponse`, `@ApiBearerAuth`, `ApiErrorEnvelope`).
 

@@ -5,6 +5,7 @@ import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
+import { VideoInvalidStateException } from '../common/exceptions/domain.exception';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
@@ -157,6 +158,62 @@ describe('VideosUploadService (integration)', () => {
     expect(job).toBeDefined();
     expect(job!.data.videoId).toBe(init.videoId);
     expect(job!.data.storageKey).toBe(init.storageKey);
+  });
+
+  async function initiateAndUploadOnePart(
+    userId: string,
+  ): Promise<{ videoId: string; etag: string }> {
+    const payload = Buffer.from('real-video-bytes-for-integration-test');
+    const init = await uploadService.initiateUpload(userId, {
+      title: 'Integration Clip',
+      filename: 'clip.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: payload.length,
+    });
+    createdKeys.push(init.storageKey);
+    const signed = await uploadService.signUploadPart(userId, init.videoId, 1);
+    const putRes = await fetch(signed.presignedUrl, {
+      method: 'PUT',
+      body: payload,
+    });
+    return { videoId: init.videoId, etag: putRes.headers.get('etag')! };
+  }
+
+  it('marks the video failed in the database when the processing job cannot be enqueued', async () => {
+    const { user } = await createOwner();
+    const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+    jest
+      .spyOn(moduleRef.get(VideosQueueService), 'enqueueProcessVideo')
+      .mockRejectedValueOnce(new Error('Redis connection refused'));
+
+    await expect(
+      uploadService.completeUpload(user.id, videoId, [{ partNumber: 1, etag }]),
+    ).rejects.toThrow('Redis connection refused');
+
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    expect(row.status).toBe(VideoStatus.FAILED);
+    expect(row.processing_error).toContain('Redis connection refused');
+  });
+
+  it('lets exactly one of two concurrent completes win and rejects the other with VideoInvalidStateException', async () => {
+    const { user } = await createOwner();
+    const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+    const parts = [{ partNumber: 1, etag }];
+
+    const results = await Promise.allSettled([
+      uploadService.completeUpload(user.id, videoId, parts),
+      uploadService.completeUpload(user.id, videoId, parts),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(VideoInvalidStateException);
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    expect(row.status).toBe(VideoStatus.PROCESSING);
   });
 
   it('aborts an active draft upload and removes the draft row', async () => {

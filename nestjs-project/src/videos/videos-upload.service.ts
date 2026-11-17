@@ -177,6 +177,19 @@ export class VideosUploadService {
       );
     }
 
+    // The conditional draft -> processing update is the lock: only one
+    // concurrent complete wins it, and the loser never reaches S3.
+    const claim = await this.videoRepository.update(
+      { id: video.id, status: VideoStatus.DRAFT },
+      { status: VideoStatus.PROCESSING },
+    );
+    if (claim.affected !== 1) {
+      throw new VideoInvalidStateException(
+        'Video upload was already completed or is no longer a draft',
+      );
+    }
+    const claimed = { id: video.id, status: VideoStatus.PROCESSING };
+
     try {
       await this.storageService.completeMultipartUpload(
         video.storage_key!,
@@ -184,6 +197,10 @@ export class VideosUploadService {
         parts,
       );
     } catch (err) {
+      // The multipart upload is still open, so the client can retry.
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.DRAFT,
+      });
       if (isS3UploadPartsClientError(err)) {
         throw new InvalidUploadPartsException(
           'Storage rejected multipart upload completion parts',
@@ -195,38 +212,39 @@ export class VideosUploadService {
     const head = await this.storageService.headObject(video.storage_key!);
     if (head.contentLength > this.config.maxFileSizeBytes) {
       await this.storageService.deleteObject(video.storage_key!);
-      await this.videoRepository.update(
-        { id: video.id },
-        {
-          status: VideoStatus.FAILED,
-          upload_id: null,
-          processing_error: 'Uploaded object exceeded maximum allowed size',
-        },
-      );
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.FAILED,
+        upload_id: null,
+        processing_error: 'Uploaded object exceeded maximum allowed size',
+      });
       throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
     }
 
-    const updateResult = await this.videoRepository.update(
-      { id: video.id, status: VideoStatus.DRAFT },
-      {
-        status: VideoStatus.PROCESSING,
-        upload_id: null,
-        size_bytes: String(head.contentLength),
-      },
-    );
-
-    if (updateResult.affected !== 1) {
-      throw new VideoInvalidStateException(
-        'Video upload was already completed or is no longer a draft',
-      );
-    }
-
-    const jobId = await this.queueService.enqueueProcessVideo({
-      videoId: video.id,
-      channelId: video.channel_id,
-      storageKey: video.storage_key!,
-      mimeType: video.mime_type,
+    await this.videoRepository.update(claimed, {
+      upload_id: null,
+      size_bytes: String(head.contentLength),
     });
+
+    let jobId: string;
+    try {
+      jobId = await this.queueService.enqueueProcessVideo({
+        videoId: video.id,
+        channelId: video.channel_id,
+        storageKey: video.storage_key!,
+        mimeType: video.mime_type,
+      });
+    } catch (err) {
+      // Without a job nothing would ever move the video out of processing.
+      const reason = err instanceof Error ? err.message : String(err);
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.FAILED,
+        processing_error: `Failed to enqueue processing job: ${reason}`.slice(
+          0,
+          1000,
+        ),
+      });
+      throw err;
+    }
 
     return {
       videoId: video.id,

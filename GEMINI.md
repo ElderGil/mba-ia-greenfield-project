@@ -86,11 +86,12 @@ As skills e regras originais de `.claude/` foram portadas para a convenção do 
 
 - **Skills do workflow e domínio:** `.agents/skills/` (cópia das skills `research`, `plan-context`, `plan-validate`, `plan-resolve`, `plan-build`, `plan-test-specs`, `plan-pipeline`, `implement`, `implement-phase`, `decide`, `nestjs-best-practices`, `typeorm`, `testing-guide-nestjs-project`, etc.).
 - **Regras de código e testes:** `.agents/rules/` (portadas de `.claude/rules/`). Antes de editar arquivos NestJS/TypeORM/testes, ler as regras aplicáveis em `.agents/rules/`.
+- **Servidores MCP:** o `.mcp.json` (Postgres) e o context7 exigido pelo `CLAUDE.md` vão no `mcp_config.json` do Antigravity, que é por usuário e fica fora do repositório (`~/.gemini/antigravity/mcp_config.json`). O equivalente versionado, sem segredos, é `.agents/mcp_config.example.json`: copie as entradas `context7` e `postgres` para o seu `mcp_config.json` e recarregue os MCPs do Antigravity.
 - **Subagents de leitura:** referenciados em `.claude/agents/` (`decisions-reader`, `decisions-detail-reader`, `decisions-correlator`, `phases-reader`, `plan-reader`); quando a ferramenta usar `invoke_subagent` ou leitura direta equivalente, seguir os mesmos contratos de retorno estruturado.
 
 ## Library Documentation Lookup
 
-Before implementing any feature, consult official documentation for the exact installed/target library version (via Context7 MCP when configured, or official docs / npm registry / `search_web` quando Context7 não estiver montado no harness).
+Before implementing any feature, you MUST use the **context7** MCP tool (configured as described in "Antigravity Ported Foundation") to look up the relevant library APIs for the exact installed version. If context7 is not available in the session, stop and configure it instead of falling back silently; record the source you used in `library-refs.md`.
 
 Always:
 - Check the installed library version in the project manifest (`package.json` / `package-lock.json`)

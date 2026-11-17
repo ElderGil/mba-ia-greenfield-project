@@ -24,7 +24,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Technical actions:**
 
-1. Install dependencies inside `nestjs-api`: `@nestjs/bullmq@^12.0.2`, `bullmq@^6.7.6`, `ioredis@^6.0.0`, `@aws-sdk/client-s3@^3.1169.0`, `@aws-sdk/s3-request-presigner@^3.1169.0` (per `phase-03-videos/TD-01`, `TD-02`, `TD-03`).
+1. Install dependencies inside `nestjs-api`: `@nestjs/bullmq@^11.0.5`, `bullmq@^6.7.6`, `ioredis@^5.11.1`, `@aws-sdk/client-s3@^3.1170.0`, `@aws-sdk/s3-request-presigner@^3.1170.0` (per `phase-03-videos/TD-01`, `TD-02`, `TD-03`; versions as implemented: the plan originally listed `@nestjs/bullmq@^12.0.2` and `ioredis@^6.0.0`, replaced during SI-03.1 because `12.x` is ESM-only, see TD-01 revision).
 2. Create `src/config/storage.config.ts` (`registerAs('storage', ...)`), `src/config/queue.config.ts` (`registerAs('queue', ...)`), and `src/config/video.config.ts` (`registerAs('video', ...)` with `maxFileSizeBytes`, `defaultPartSizeBytes`, `presignedUrlExpiresInSeconds`) following `phase-01-configuracao-base/TD-03`.
 3. Extend `src/config/env.validation.ts` (`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `VIDEO_MAX_SIZE_BYTES`, `VIDEO_UPLOAD_PART_SIZE_BYTES`), update `nestjs-project/.env.example` and `nestjs-project/.env`, and register the new configs in `ConfigModule.forRoot` (`AppModule` and `WorkerModule`).
 4. Update `nestjs-project/Dockerfile.dev` to install `ffmpeg` (`apt install -y procps curl ffmpeg`) so both `video-worker` and integration tests inside `nestjs-api` have `ffmpeg` and `ffprobe` binaries (per `phase-03-videos/TD-05`).
@@ -164,7 +164,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 1. Create `src/videos/dto/sign-upload-part.dto.ts` (`partNumber`: int `1..10000`) and `src/videos/dto/complete-upload.dto.ts` (`parts`: non-empty array of `{ partNumber, etag }`).
 2. Implement `VideosUploadService.signUploadPart(userId, videoId, partNumber)`: verifies channel ownership, `status === 'draft'`, `upload_id` present, and returns presigned `UploadPart` URL + `expiresIn`.
-3. Implement `VideosUploadService.completeUpload(userId, videoId, dto)`: verifies channel ownership, `status === 'draft'`, completes S3 multipart upload (parts sorted ascending), verifies `HeadObject` size ≤ 10 GiB, atomically updates `status` from `'draft'` to `'processing'` (`UPDATE ... WHERE id = :id AND status = 'draft'`), and enqueues `process-video` via `VideosQueueService`.
+3. Implement `VideosUploadService.completeUpload(userId, videoId, dto)`: verifies channel ownership and `status === 'draft'`, claims the row by atomically updating `status` from `'draft'` to `'processing'` (`UPDATE ... WHERE id = :id AND status = 'draft'`; `affected !== 1` → `VideoInvalidStateException`), completes S3 multipart upload (parts sorted ascending; on rejection reverts to `'draft'`), verifies `HeadObject` size ≤ 10 GiB, and enqueues `process-video` via `VideosQueueService` (on enqueue failure marks `'failed'` with `processing_error`). _Order revised on 2026-11-17 (peer review): the claim used to run after the S3 completion, which let a concurrent second complete reach S3 and left the row in `processing` if the enqueue failed._
 4. Implement `VideosUploadService.abortUpload(userId, videoId)`: verifies channel ownership and `status === 'draft'`, calls `S3StorageService.abortMultipartUpload`, and removes or marks aborted draft cleanly (removing the uncompleted `draft` row so aborted drafts do not pollute channel listings).
 
 **Tests:**
@@ -178,7 +178,8 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Acceptance criteria:**
 
-- Completing a multipart upload transitions the video atomically from `draft` to `processing` and enqueues exactly one BullMQ job.
+- Completing a multipart upload transitions the video atomically from `draft` to `processing` and enqueues exactly one BullMQ job; of two concurrent completes exactly one succeeds and the other gets `VideoInvalidStateException` (`409`).
+- A rejected part list reverts the video to `draft`; a failed enqueue leaves it `failed` with `processing_error`, never `processing` without a job.
 - Calling `completeUpload` or `signUploadPart` on a non-owner video throws `VideoAccessDeniedException` (`403`), and on a non-`draft` video throws `VideoInvalidStateException` (`409`).
 
 ---
@@ -571,7 +572,7 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
 
 **Producer:** `VideosQueueService` inside `nestjs-api` (`POST /videos/:id/uploads/complete`) (per `phase-03-videos/TD-01`, `TD-04`)
 **Consumer:** `VideoProcessingProcessor` inside `video-worker` (`@Processor('video-processing')`) (per `phase-03-videos/TD-01`, `TD-05`)
-**Trigger:** Upload completion transitions video atomically from `draft` to `processing` after S3 multipart assembly and `HeadObject` verification.
+**Trigger:** Upload completion claims the video atomically (`draft` → `processing`), then the API assembles the S3 multipart upload, verifies `HeadObject` and enqueues the job; an enqueue failure marks the video `failed`.
 **Delivery semantics:** At-least-once with deterministic `jobId: process-video-${videoId}`, `attempts: 3`, exponential backoff (`delay: 2000ms`), and `@OnWorkerEvent('failed')` terminal state transition to `failed` once retries exhaust (per `phase-03-videos/TD-01`, `TD-04`).
 
 ---
