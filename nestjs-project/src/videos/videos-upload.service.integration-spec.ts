@@ -195,6 +195,30 @@ describe('VideosUploadService (integration)', () => {
     expect(row.processing_error).toContain('Redis connection refused');
   });
 
+  it('marks the video failed in the database when the completed object cannot be inspected', async () => {
+    const { user } = await createOwner();
+    const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+    jest
+      .spyOn(moduleRef.get(S3StorageService), 'headObject')
+      .mockRejectedValueOnce(new Error('socket hang up'));
+    const enqueue = jest.spyOn(
+      moduleRef.get(VideosQueueService),
+      'enqueueProcessVideo',
+    );
+
+    await expect(
+      uploadService.completeUpload(user.id, videoId, [{ partNumber: 1, etag }]),
+    ).rejects.toThrow('socket hang up');
+
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    expect(row.status).toBe(VideoStatus.FAILED);
+    expect(row.upload_id).toBeNull();
+    expect(row.processing_error).toContain('socket hang up');
+    expect(enqueue).not.toHaveBeenCalledWith(
+      expect.objectContaining({ videoId }),
+    );
+  });
+
   it('lets exactly one of two concurrent completes win and rejects the other with VideoInvalidStateException', async () => {
     const { user } = await createOwner();
     const { videoId, etag } = await initiateAndUploadOnePart(user.id);

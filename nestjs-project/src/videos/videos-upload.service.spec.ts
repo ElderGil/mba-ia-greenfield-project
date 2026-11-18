@@ -305,6 +305,52 @@ describe('VideosUploadService', () => {
         );
       });
 
+      it('should mark the video failed when the completed object cannot be inspected', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
+        const storageDown = new Error('socket hang up');
+        mockStorageService.headObject.mockRejectedValue(storageDown);
+
+        await expect(
+          service.completeUpload('u1', 'vid-1', parts),
+        ).rejects.toThrow(storageDown);
+        expect(mockQueueService.enqueueProcessVideo).not.toHaveBeenCalled();
+        expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
+          { id: 'vid-1', status: VideoStatus.PROCESSING },
+          {
+            status: VideoStatus.FAILED,
+            upload_id: null,
+            processing_error: expect.stringContaining(
+              'socket hang up',
+            ) as string,
+          },
+        );
+      });
+
+      it('should mark the video failed before deleting an oversized object, even if the delete fails', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
+        mockStorageService.headObject.mockResolvedValue({
+          contentLength: cfg.maxFileSizeBytes + 1,
+          contentType: 'video/mp4',
+        });
+        const deleteFailed = new Error('delete timed out');
+        mockStorageService.deleteObject.mockRejectedValue(deleteFailed);
+
+        await expect(
+          service.completeUpload('u1', 'vid-1', parts),
+        ).rejects.toThrow(deleteFailed);
+        expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
+          { id: 'vid-1', status: VideoStatus.PROCESSING },
+          {
+            status: VideoStatus.FAILED,
+            upload_id: null,
+            processing_error: 'Uploaded object exceeded maximum allowed size',
+          },
+        );
+        expect(mockQueueService.enqueueProcessVideo).not.toHaveBeenCalled();
+      });
+
       it('should mark the video failed when the processing job cannot be enqueued', async () => {
         mockVideoRepo.update.mockResolvedValue({ affected: 1 });
         mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
