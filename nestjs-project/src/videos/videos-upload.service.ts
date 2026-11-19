@@ -16,6 +16,7 @@ import videoConfig from '../config/video.config';
 import {
   type CompletedPartInput,
   S3StorageService,
+  type StorageObjectMetadata,
 } from '../storage/s3-storage.service';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -38,6 +39,12 @@ function isPgUniqueViolationOnShortCode(err: unknown): boolean {
     typeof pgErr.detail === 'string' &&
     pgErr.detail.includes('short_code')
   );
+}
+
+// processing_error is persisted for the owner; keep it bounded.
+function failureReason(context: string, err: unknown): string {
+  const reason = err instanceof Error ? err.message : String(err);
+  return `${context}: ${reason}`.slice(0, 1000);
 }
 
 function isS3UploadPartsClientError(err: unknown): boolean {
@@ -209,14 +216,31 @@ export class VideosUploadService {
       throw err;
     }
 
-    const head = await this.storageService.headObject(video.storage_key!);
+    // From here on the multipart upload is closed and cannot go back to
+    // draft, so a failure must end in failed instead of processing.
+    let head: StorageObjectMetadata;
+    try {
+      head = await this.storageService.headObject(video.storage_key!);
+    } catch (err) {
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.FAILED,
+        upload_id: null,
+        processing_error: failureReason(
+          'Failed to inspect uploaded object',
+          err,
+        ),
+      });
+      throw err;
+    }
+
     if (head.contentLength > this.config.maxFileSizeBytes) {
-      await this.storageService.deleteObject(video.storage_key!);
+      // Record the final state first: a failed delete only orphans the object.
       await this.videoRepository.update(claimed, {
         status: VideoStatus.FAILED,
         upload_id: null,
         processing_error: 'Uploaded object exceeded maximum allowed size',
       });
+      await this.storageService.deleteObject(video.storage_key!);
       throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
     }
 
@@ -235,12 +259,11 @@ export class VideosUploadService {
       });
     } catch (err) {
       // Without a job nothing would ever move the video out of processing.
-      const reason = err instanceof Error ? err.message : String(err);
       await this.videoRepository.update(claimed, {
         status: VideoStatus.FAILED,
-        processing_error: `Failed to enqueue processing job: ${reason}`.slice(
-          0,
-          1000,
+        processing_error: failureReason(
+          'Failed to enqueue processing job',
+          err,
         ),
       });
       throw err;
