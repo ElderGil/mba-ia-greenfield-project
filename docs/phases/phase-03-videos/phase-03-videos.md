@@ -164,7 +164,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 1. Create `src/videos/dto/sign-upload-part.dto.ts` (`partNumber`: int `1..10000`) and `src/videos/dto/complete-upload.dto.ts` (`parts`: non-empty array of `{ partNumber, etag }`).
 2. Implement `VideosUploadService.signUploadPart(userId, videoId, partNumber)`: verifies channel ownership, `status === 'draft'`, `upload_id` present, and returns presigned `UploadPart` URL + `expiresIn`.
-3. Implement `VideosUploadService.completeUpload(userId, videoId, dto)`: verifies channel ownership and `status === 'draft'`, claims the row by atomically updating `status` from `'draft'` to `'processing'` (`UPDATE ... WHERE id = :id AND status = 'draft'`; `affected !== 1` → `VideoInvalidStateException`), completes S3 multipart upload (parts sorted ascending; on rejection reverts to `'draft'`), verifies `HeadObject` size ≤ 10 GiB, and enqueues `process-video` via `VideosQueueService` (on enqueue failure marks `'failed'` with `processing_error`). _Order revised on 2026-11-17 (peer review): the claim used to run after the S3 completion, which let a concurrent second complete reach S3 and left the row in `processing` if the enqueue failed._
+3. Implement `VideosUploadService.completeUpload(userId, videoId, dto)`: verifies channel ownership and `status === 'draft'`, claims the row by atomically updating `status` from `'draft'` to `'processing'` (`UPDATE ... WHERE id = :id AND status = 'draft'`; `affected !== 1` → `VideoInvalidStateException`), completes S3 multipart upload (parts sorted ascending; on rejection reverts to `'draft'`), verifies `HeadObject` size ≤ 10 GiB (a `HeadObject` failure or an oversized object marks `'failed'`; the row is updated before the oversized object is deleted), and enqueues `process-video` via `VideosQueueService` (on enqueue failure marks `'failed'` with `processing_error`). _Order revised on 2026-11-17 (peer review): the claim used to run after the S3 completion, which let a concurrent second complete reach S3 and left the row in `processing` if the enqueue failed._
 4. Implement `VideosUploadService.abortUpload(userId, videoId)`: verifies channel ownership and `status === 'draft'`, calls `S3StorageService.abortMultipartUpload`, and removes or marks aborted draft cleanly (removing the uncompleted `draft` row so aborted drafts do not pollute channel listings).
 
 **Tests:**
@@ -179,7 +179,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 **Acceptance criteria:**
 
 - Completing a multipart upload transitions the video atomically from `draft` to `processing` and enqueues exactly one BullMQ job; of two concurrent completes exactly one succeeds and the other gets `VideoInvalidStateException` (`409`).
-- A rejected part list reverts the video to `draft`; a failed enqueue leaves it `failed` with `processing_error`, never `processing` without a job.
+- A rejected part list reverts the video to `draft`; after the S3 completion, a failed `HeadObject`, an oversized object or a failed enqueue leaves it `failed` with `processing_error`, never `processing` without a job.
 - Calling `completeUpload` or `signUploadPart` on a non-owner video throws `VideoAccessDeniedException` (`403`), and on a non-`draft` video throws `VideoInvalidStateException` (`409`).
 
 ---
@@ -572,7 +572,7 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
 
 **Producer:** `VideosQueueService` inside `nestjs-api` (`POST /videos/:id/uploads/complete`) (per `phase-03-videos/TD-01`, `TD-04`)
 **Consumer:** `VideoProcessingProcessor` inside `video-worker` (`@Processor('video-processing')`) (per `phase-03-videos/TD-01`, `TD-05`)
-**Trigger:** Upload completion claims the video atomically (`draft` → `processing`), then the API assembles the S3 multipart upload, verifies `HeadObject` and enqueues the job; an enqueue failure marks the video `failed`.
+**Trigger:** Upload completion claims the video atomically (`draft` → `processing`), then the API assembles the S3 multipart upload, verifies `HeadObject` and enqueues the job; a `HeadObject` or enqueue failure marks the video `failed`.
 **Delivery semantics:** At-least-once with deterministic `jobId: process-video-${videoId}`, `attempts: 3`, exponential backoff (`delay: 2000ms`), and `@OnWorkerEvent('failed')` terminal state transition to `failed` once retries exhaust (per `phase-03-videos/TD-01`, `TD-04`).
 
 ---
