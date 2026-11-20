@@ -5,7 +5,7 @@ import { Job, UnrecoverableError } from 'bullmq';
 import { Repository } from 'typeorm';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
-import { MediaProcessorService } from './media-processor.service';
+import { MediaProcessorService, redactUrls } from './media-processor.service';
 import {
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
@@ -112,7 +112,8 @@ export class VideoProcessingProcessor
       { id: job.data.videoId },
       {
         status: VideoStatus.FAILED,
-        processing_error: error.message.slice(0, 1000),
+        // Defence in depth: no error path may persist a signed URL.
+        processing_error: redactUrls(error.message).slice(0, 1000),
       },
     );
   }

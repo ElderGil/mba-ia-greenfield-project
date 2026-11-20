@@ -205,6 +205,33 @@ describe('MediaProcessorService (integration with ffmpeg/ffprobe)', () => {
       await new Promise((r) => server.close(r));
     });
 
+    it('reports a short tool error without the signed URL or its credentials', async () => {
+      const signed = `${baseUrl}/missing.mp4?X-Amz-Credential=minioadmin%2F20261120&X-Amz-Signature=deadbeefcafe`;
+
+      for (const run of [
+        () => service.probeVideo(signed, 'video/mp4'),
+        () => service.generateThumbnail(signed, 1, 'video/mp4'),
+      ]) {
+        const err = await run().then(
+          () => undefined,
+          (e: Error) => e,
+        );
+        expect(err).toBeInstanceOf(Error);
+        const message = err!.message;
+        expect(message).toMatch(/^(ffprobe|ffmpeg) failed: /);
+        expect(message).toContain('404');
+        for (const secret of [
+          'minioadmin',
+          'deadbeefcafe',
+          'X-Amz',
+          '127.0.0.1',
+        ]) {
+          expect(message).not.toContain(secret);
+        }
+        expect(message.length).toBeLessThan(300);
+      }
+    });
+
     it('does not follow URLs referenced by a playlist disguised as video/mp4', async () => {
       await expect(
         service.probeVideo(`${baseUrl}/original.mp4`, 'video/mp4'),

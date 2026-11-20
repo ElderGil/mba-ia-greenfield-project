@@ -604,6 +604,7 @@ describe('Videos (e2e)', () => {
 
     const settled = await pollVideoUntilSettled(accessToken, videoId, 25000);
     expect(settled.status).toBe(VideoStatus.FAILED);
-    expect(settled.processingError).toBeTruthy();
+    expect(settled.processingError).toMatch(/^ffprobe failed: /);
+    expect(settled.processingError).not.toMatch(/X-Amz|minio:9000|https?:\/\//);
   }, 30000);
 });

@@ -8,6 +8,40 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+const TOOL_OPTIONS = { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 };
+
+/**
+ * Replaces every URL with <url>. The worker reads media through presigned
+ * URLs, and tool errors echo them back with the access key id, the internal
+ * host and a valid signature; those messages end up in processing_error,
+ * which the owner can read.
+ */
+export function redactUrls(text: string): string {
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, '<url>');
+}
+
+// execFile's own message is the whole command line (URL included), and the
+// stderr of ffmpeg starts with its banner; keep only the redacted last
+// error lines.
+async function runTool(
+  tool: 'ffprobe' | 'ffmpeg',
+  args: string[],
+): Promise<{ stdout: string }> {
+  try {
+    return await execFileAsync(tool, args, TOOL_OPTIONS);
+  } catch (err) {
+    const e = err as { stderr?: string; killed?: boolean; code?: unknown };
+    const detail = e.killed
+      ? `timed out after ${TOOL_OPTIONS.timeout / 1000}s`
+      : redactUrls(e.stderr ?? '')
+          .trim()
+          .split('\n')
+          .slice(-2)
+          .join(' | ') || `exit code ${String(e.code)}`;
+    throw new Error(`${tool} failed: ${detail}`.slice(0, 280));
+  }
+}
+
 export interface VideoProbeMetadata {
   durationSeconds: number;
   width: number | null;
@@ -66,19 +100,15 @@ export class MediaProcessorService {
     inputUrlOrPath: string,
     mimeType: string,
   ): Promise<VideoProbeMetadata> {
-    const { stdout } = await execFileAsync(
-      'ffprobe',
-      [
-        '-v',
-        'quiet',
-        '-print_format',
-        'json',
-        '-show_format',
-        '-show_streams',
-        ...inputArgs(inputUrlOrPath, mimeType),
-      ],
-      { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 },
-    );
+    const { stdout } = await runTool('ffprobe', [
+      '-v',
+      'error',
+      '-print_format',
+      'json',
+      '-show_format',
+      '-show_streams',
+      ...inputArgs(inputUrlOrPath, mimeType),
+    ]);
 
     const parsed = JSON.parse(stdout) as FfprobeOutput;
     const videoStream = parsed.streams?.find(
@@ -111,23 +141,22 @@ export class MediaProcessorService {
     const outputPath = path.join(os.tmpdir(), `thumb-${randomUUID()}.jpg`);
 
     try {
-      await execFileAsync(
-        'ffmpeg',
-        [
-          '-y',
-          '-ss',
-          String(seekSeconds),
-          ...inputArgs(inputUrlOrPath, mimeType),
-          '-vframes',
-          '1',
-          '-q:v',
-          '2',
-          '-f',
-          'image2',
-          outputPath,
-        ],
-        { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 },
-      );
+      await runTool('ffmpeg', [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-ss',
+        String(seekSeconds),
+        ...inputArgs(inputUrlOrPath, mimeType),
+        '-vframes',
+        '1',
+        '-q:v',
+        '2',
+        '-f',
+        'image2',
+        outputPath,
+      ]);
 
       const buffer = await fs.readFile(outputPath);
       if (buffer.length === 0) {

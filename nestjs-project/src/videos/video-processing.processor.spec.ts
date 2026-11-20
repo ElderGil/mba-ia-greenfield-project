@@ -130,6 +130,27 @@ describe('VideoProcessingProcessor', () => {
     );
   });
 
+  it('never persists URLs from an error message in processing_error', async () => {
+    const exhaustedJob = {
+      ...job,
+      attemptsMade: 3,
+      opts: { attempts: 3 },
+    } as unknown as Job<VideoProcessingJobData>;
+
+    await processor.onFailed(
+      exhaustedJob,
+      new Error(
+        'Command failed: ffprobe http://minio:9000/streamtube-media/x.mp4?X-Amz-Signature=abc',
+      ),
+    );
+
+    const [, fields] = mockVideoRepo.update.mock.calls[0] as [
+      unknown,
+      { processing_error: string },
+    ];
+    expect(fields.processing_error).toBe('Command failed: ffprobe <url>');
+  });
+
   it('marks video failed once max attempts are exhausted', async () => {
     const exhaustedJob = {
       ...job,
