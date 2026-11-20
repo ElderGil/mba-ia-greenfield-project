@@ -86,6 +86,36 @@ describe('MediaProcessorService (integration with ffmpeg/ffprobe)', () => {
     }
   });
 
+  it('extracts a thumbnail when the duration is just over 1s (no frame at 1s)', async () => {
+    const file = path.join(os.tmpdir(), `edge-${randomUUID()}.mp4`);
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=duration=1:size=160x120:rate=30',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      file,
+    ]);
+    try {
+      const { durationSeconds } = await service.probeVideo(file, 'video/mp4');
+      expect(durationSeconds).toBeGreaterThanOrEqual(1);
+
+      const jpeg = await service.generateThumbnail(
+        file,
+        durationSeconds,
+        'video/mp4',
+      );
+      expect(jpeg[0]).toBe(0xff);
+      expect(jpeg[1]).toBe(0xd8);
+    } finally {
+      await fs.unlink(file).catch(() => undefined);
+    }
+  });
+
   async function makeTemp(ext: string): Promise<string> {
     return Promise.resolve(
       path.join(os.tmpdir(), `media-${randomUUID()}.${ext}`),

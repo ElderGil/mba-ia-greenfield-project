@@ -137,7 +137,26 @@ export class MediaProcessorService {
     durationSeconds: number,
     mimeType: string,
   ): Promise<Buffer> {
-    const seekSeconds = durationSeconds >= 1 ? 1 : 0;
+    // Seeking to exactly the duration yields no frame (a 1.0 s clip has none
+    // at 1 s) and ffmpeg still exits 0, so stay inside the clip and fall back
+    // to the first frame when nothing came out.
+    const preferred = Math.min(1, durationSeconds / 2);
+    const first = await this.extractFrame(inputUrlOrPath, mimeType, preferred);
+    if (first) return first;
+    if (preferred > 0) {
+      const fallback = await this.extractFrame(inputUrlOrPath, mimeType, 0);
+      if (fallback) return fallback;
+    }
+    throw new Error(
+      'ffmpeg failed: no frame could be extracted for the thumbnail',
+    );
+  }
+
+  private async extractFrame(
+    inputUrlOrPath: string,
+    mimeType: string,
+    seekSeconds: number,
+  ): Promise<Buffer | null> {
     const outputPath = path.join(os.tmpdir(), `thumb-${randomUUID()}.jpg`);
 
     try {
@@ -158,11 +177,8 @@ export class MediaProcessorService {
         outputPath,
       ]);
 
-      const buffer = await fs.readFile(outputPath);
-      if (buffer.length === 0) {
-        throw new Error('Generated thumbnail file is empty');
-      }
-      return buffer;
+      const buffer = await fs.readFile(outputPath).catch(() => null);
+      return buffer && buffer.length > 0 ? buffer : null;
     } finally {
       await fs.unlink(outputPath).catch(() => undefined);
     }
