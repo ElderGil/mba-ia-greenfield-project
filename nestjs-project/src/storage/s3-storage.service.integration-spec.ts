@@ -1,3 +1,4 @@
+import { DeleteBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import storageConfig from '../config/storage.config';
@@ -37,6 +38,42 @@ describe('S3StorageService (integration)', () => {
       await storageService.deleteObject(key).catch(() => undefined);
     }
     await moduleRef.close();
+  });
+
+  it('lets the API and the worker create a missing bucket at the same time', async () => {
+    // First start: both processes find no bucket and both create it.
+    const cfg = { ...storageConfig(), bucket: `race-${Date.now()}` };
+    const services = await Promise.all(
+      [1, 2].map(async () => {
+        const ref = await Test.createTestingModule({
+          providers: [
+            S3StorageService,
+            { provide: storageConfig.KEY, useValue: cfg },
+          ],
+        }).compile();
+        return ref.get(S3StorageService);
+      }),
+    );
+    const admin = new S3Client({
+      region: cfg.region,
+      endpoint: cfg.endpoint,
+      forcePathStyle: cfg.forcePathStyle,
+      credentials: {
+        accessKeyId: cfg.accessKeyId,
+        secretAccessKey: cfg.secretAccessKey,
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all(services.map((service) => service.ensureBucket())),
+      ).resolves.toBeDefined();
+    } finally {
+      await admin
+        .send(new DeleteBucketCommand({ Bucket: cfg.bucket }))
+        .catch(() => undefined);
+      admin.destroy();
+    }
   });
 
   it('creates bucket idempotently, puts object, heads, reads byte range, and deletes', async () => {
