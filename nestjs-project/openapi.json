@@ -1486,28 +1486,28 @@
             "type": "number"
           },
           "durationSeconds": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "width": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "height": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "codec": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "thumbnailUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "Public thumbnail URL once the video is ready"
           },
           "processingError": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "createdAt": {
@@ -1528,6 +1528,12 @@
           "status",
           "mimeType",
           "sizeBytes",
+          "durationSeconds",
+          "width",
+          "height",
+          "codec",
+          "thumbnailUrl",
+          "processingError",
           "createdAt",
           "updatedAt"
         ]
@@ -1561,19 +1567,19 @@
             "type": "number"
           },
           "durationSeconds": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "width": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "height": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "codec": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "streamUrl": {
@@ -1597,6 +1603,10 @@
           "status",
           "mimeType",
           "sizeBytes",
+          "durationSeconds",
+          "width",
+          "height",
+          "codec",
           "streamUrl",
           "downloadUrl",
           "thumbnailUrl",

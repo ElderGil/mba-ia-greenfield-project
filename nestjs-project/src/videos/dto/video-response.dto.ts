@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { Video, VideoStatus } from '../entities/video.entity';
 
 export class InitiateUploadResponseDto {
@@ -90,25 +90,26 @@ export class VideoOwnerResponseDto {
   @ApiProperty()
   sizeBytes: number;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'number', nullable: true })
   durationSeconds: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'integer', nullable: true })
   width: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'integer', nullable: true })
   height: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   codec: string | null;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
+    type: 'string',
     nullable: true,
     description: 'Public thumbnail URL once the video is ready',
   })
   thumbnailUrl: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   processingError: string | null;
 
   @ApiProperty()
@@ -161,16 +162,16 @@ export class VideoPublicResponseDto {
   @ApiProperty()
   sizeBytes: number;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'number', nullable: true })
   durationSeconds: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'integer', nullable: true })
   width: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'integer', nullable: true })
   height: number | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ type: 'string', nullable: true })
   codec: string | null;
 
   @ApiProperty()
