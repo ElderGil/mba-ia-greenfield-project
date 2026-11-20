@@ -35,7 +35,7 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
-- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe; also runs the maintenance sweep. Runs `node` directly (no `npm run`) so `docker compose stop` delivers SIGTERM to Nest
+- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe; also runs the maintenance sweep. Waits for `node_modules` on a fresh clone, then `exec`s `node` (no `npm run` in between) so `docker compose stop` delivers SIGTERM to Nest
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
 - `mailpit` — Mailpit SMTP `1025`, Web UI `8025`
 - `minio` — S3-compatible object storage (`pgsty/silo`), API port `9000`, Console port `9001`

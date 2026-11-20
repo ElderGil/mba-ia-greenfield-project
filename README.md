@@ -139,8 +139,8 @@ cp .env.example .env
 # Sobe api, video-worker, db, mailpit, minio (pgsty/silo) e redis
 docker compose up -d
 
-# Instala dependências (apenas na primeira subida). O video-worker sobe antes
-# do node_modules existir e reinicia sozinho (restart: unless-stopped) até conseguir.
+# Instala dependências (apenas na primeira subida). O video-worker espera o
+# node_modules existir ("waiting for npm install") e sobe sozinho em seguida.
 docker compose exec nestjs-api npm install
 
 # Executa as migrations (synchronize está desabilitado)
