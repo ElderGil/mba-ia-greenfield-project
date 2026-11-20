@@ -156,12 +156,19 @@ export class VideosService {
     return { start, end };
   }
 
+  /**
+   * @param selectRange given the media ETag, returns the Range header to
+   *   honour (or undefined for the full file); the HTTP layer decides it
+   *   because conditionals are evaluated before Range (selectRange()).
+   */
   async getVideoStream(
     shortCode: string,
-    rangeHeader?: string,
+    selectRange: (etag: string) => string | undefined = () => undefined,
   ): Promise<VideoStreamPayload> {
     const video = await this.getReadyVideoByShortCode(shortCode);
     const totalSize = Number(video.size_bytes);
+    const etag = mediaEtag(video);
+    const rangeHeader = selectRange(etag);
 
     const storageKey = video.storage_key!;
 
@@ -170,7 +177,7 @@ export class VideosService {
       const range = `bytes=${start}-${end}`;
       return {
         open: () => this.storageService.getObjectStream(storageKey, range),
-        etag: mediaEtag(video),
+        etag,
         contentType: video.mime_type,
         contentLength: end - start + 1,
         totalSize,
@@ -181,7 +188,7 @@ export class VideosService {
 
     return {
       open: () => this.storageService.getObjectStream(storageKey),
-      etag: mediaEtag(video),
+      etag,
       contentType: video.mime_type,
       contentLength: totalSize,
       totalSize,

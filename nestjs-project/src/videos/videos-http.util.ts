@@ -44,6 +44,40 @@ export function buildContentDisposition(filename: string): string {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeRfc5987(name)}`;
 }
 
+const BYTES_UNIT = 'bytes=';
+
+/**
+ * The Range header to honour, or undefined when the full representation
+ * must be sent. Decided before the range is parsed (RFC 9110):
+ * - range handling is defined for GET only, so HEAD ignores Range (§14.2);
+ * - a matching If-None-Match ends in 304, never in 206/416 (§13.2.2);
+ * - If-Range must be a strong match for the current ETag; anything else,
+ *   an HTTP-date included (no Last-Modified is sent), asks for the full
+ *   representation (§13.1.5);
+ * - an unknown range unit is ignored (§14.2), and so are several ranges,
+ *   which this endpoint does not serve (multipart/byteranges).
+ * A malformed or unsatisfiable byte range is left to the parser (416).
+ */
+export function selectRange(
+  req: Pick<Request, 'method' | 'headers'>,
+  etag: string,
+): string | undefined {
+  const range = req.headers.range?.trim();
+  if (!range || req.method !== 'GET') return undefined;
+  if (matchesIfNoneMatch(req.headers['if-none-match'], etag)) return undefined;
+
+  const ifRange = req.headers['if-range'];
+  if (ifRange !== undefined && String(ifRange).trim() !== etag) {
+    return undefined;
+  }
+
+  // Range units are case-insensitive.
+  if (!range.toLowerCase().startsWith(BYTES_UNIT) || range.includes(',')) {
+    return undefined;
+  }
+  return BYTES_UNIT + range.slice(BYTES_UNIT.length);
+}
+
 /**
  * Sends a media body without buffering it.
  *

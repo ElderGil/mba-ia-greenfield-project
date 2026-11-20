@@ -185,7 +185,7 @@ Module `src/videos/` (+ `src/storage/`, worker in `src/worker.module.ts`). Decis
 | `GET /videos/me` | JWT | Videos of the caller's channel, any status |
 | `GET /videos/:id/status` | owner | Status, extracted metadata, `processingError`, `thumbnailUrl` |
 | `GET /videos/:shortCode` | public | Metadata + stream/download/thumbnail URLs |
-| `GET /videos/:shortCode/stream` | public | `200`, or `206` with `Range`; `416` carries `Content-Range: bytes */size` |
+| `GET /videos/:shortCode/stream` | public | `200`, or `206` for a single byte `Range` on `GET`; `416` carries `Content-Range: bytes */size`. Conditionals come first (`selectRange()`): matching `If-None-Match` → `304`, `If-Range` ≠ current ETag → full `200`; `HEAD`, unknown units and multiple ranges → full representation |
 | `GET /videos/:shortCode/download` | public | Full file, RFC 6266 `Content-Disposition` (ASCII `filename` + UTF-8 `filename*`) |
 | `GET /videos/:shortCode/thumbnail` | public | JPEG thumbnail |
 

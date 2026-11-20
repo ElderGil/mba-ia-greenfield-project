@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -38,7 +37,11 @@ import {
   VideoOwnerResponseDto,
   VideoPublicResponseDto,
 } from './dto/video-response.dto';
-import { buildContentDisposition, sendMedia } from './videos-http.util';
+import {
+  buildContentDisposition,
+  selectRange,
+  sendMedia,
+} from './videos-http.util';
 import { INITIATE_UPLOAD_THROTTLE } from './videos.constants';
 import { VideosUploadService } from './videos-upload.service';
 import { VideosService } from './videos.service';
@@ -382,12 +385,18 @@ export class VideosController {
   @ApiOperation({
     summary: 'Stream video content with HTTP Byte-Range support',
     description:
-      'Streams a ready video via 206 Partial Content when a Range header is supplied, or 200 OK otherwise.',
+      'Streams a ready video via 206 Partial Content for a single byte range on GET, or 200 OK otherwise. Conditionals are evaluated first (RFC 9110): a matching If-None-Match answers 304, an If-Range that is not the current ETag gets the full file. HEAD, unknown range units and multiple ranges get the full representation.',
   })
   @ApiHeader({
     name: 'Range',
     required: false,
-    description: 'Byte range (e.g., bytes=0-1048575)',
+    description: 'Single byte range (e.g., bytes=0-1048575)',
+  })
+  @ApiHeader({
+    name: 'If-Range',
+    required: false,
+    description:
+      'Serve the range only if the ETag still matches; otherwise the full file',
   })
   @ApiResponse({ status: 206, description: 'Partial video byte stream' })
   @ApiResponse({ status: 200, description: 'Full video byte stream' })
@@ -407,11 +416,12 @@ export class VideosController {
   })
   async streamVideo(
     @Param('shortCode') shortCode: string,
-    @Headers('range') range: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const payload = await this.videosService.getVideoStream(shortCode, range);
+    const payload = await this.videosService.getVideoStream(shortCode, (etag) =>
+      selectRange(req, etag),
+    );
     const headers: Record<string, string> = {
       'Accept-Ranges': 'bytes',
       'Content-Type': payload.contentType,

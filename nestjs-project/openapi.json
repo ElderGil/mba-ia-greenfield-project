@@ -1046,7 +1046,7 @@
     },
     "/videos/{shortCode}/stream": {
       "get": {
-        "description": "Streams a ready video via 206 Partial Content when a Range header is supplied, or 200 OK otherwise.",
+        "description": "Streams a ready video via 206 Partial Content for a single byte range on GET, or 200 OK otherwise. Conditionals are evaluated first (RFC 9110): a matching If-None-Match answers 304, an If-Range that is not the current ETag gets the full file. HEAD, unknown range units and multiple ranges get the full representation.",
         "operationId": "VideosController_streamVideo",
         "parameters": [
           {
@@ -1058,9 +1058,18 @@
             }
           },
           {
+            "name": "If-Range",
+            "in": "header",
+            "description": "Serve the range only if the ETag still matches; otherwise the full file",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "Range",
             "in": "header",
-            "description": "Byte range (e.g., bytes=0-1048575)",
+            "description": "Single byte range (e.g., bytes=0-1048575)",
             "required": false,
             "schema": {
               "type": "string"
