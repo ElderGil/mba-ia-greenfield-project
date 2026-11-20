@@ -178,7 +178,7 @@ Module `src/videos/` (+ `src/storage/`, worker in `src/worker.module.ts`). Decis
 | `POST /videos/uploads/initiate` | JWT, throttled 10/min | Creates the `draft` row (unique 11-char `shortCode`) and the S3 multipart upload. `409 TOO_MANY_OPEN_UPLOADS` past `VIDEO_MAX_OPEN_DRAFTS` |
 | `POST /videos/:id/uploads/parts` | owner, draft | Presigned `PUT` URL for one part (the client uploads straight to storage) |
 | `GET /videos/:id/uploads/parts` | owner, draft | Parts already stored, with ETags, to resume an upload |
-| `POST /videos/:id/uploads/complete` | owner, draft | `202`: claims draft → processing (conditional UPDATE, loser gets `409`), completes S3, checks size, enqueues the job |
+| `POST /videos/:id/uploads/complete` | owner, draft | `202`: claims draft → processing (conditional UPDATE, loser gets `409`), sums the stored parts (`413` and the upload aborted above the limit, before S3 assembles anything), completes S3, checks the object size, enqueues the job |
 | `POST /videos/:id/uploads/abort` | owner, draft | `204`: claims the draft, aborts the multipart upload and deletes the draft; `409` if a complete claimed it first |
 | `GET /videos/me` | JWT | Videos of the caller's channel, any status |
 | `GET /videos/:id/status` | owner | Status, extracted metadata, `processingError`, `thumbnailUrl` |

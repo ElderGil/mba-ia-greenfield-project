@@ -35,6 +35,7 @@ import { MAX_MULTIPART_PARTS, videoFormatOf } from './videos.constants';
 const PG_UNIQUE_VIOLATION = '23505';
 const NOT_A_DRAFT_MESSAGE =
   'Video upload was already completed or is no longer a draft';
+const OVERSIZE_REASON = 'Uploaded object exceeded maximum allowed size';
 const UPLOAD_GONE_REASON =
   'The multipart upload no longer exists (expired or aborted); upload the video again';
 const MAX_SHORT_CODE_RETRIES = 5;
@@ -229,6 +230,33 @@ export class VideosUploadService {
     }
     const claimed = { id: video.id, status: VideoStatus.PROCESSING };
 
+    // Parts go straight to storage through presigned URLs, which cannot cap
+    // their size: sum what storage holds before it assembles anything.
+    let storedBytes: number | undefined;
+    try {
+      storedBytes = await this.sumStoredParts(video, parts);
+    } catch (err) {
+      if (!isNoSuchUpload(err)) {
+        await this.videoRepository.update(claimed, {
+          status: VideoStatus.DRAFT,
+        });
+        throw err;
+      }
+      // Already closed: the complete below reconciles it.
+    }
+    if (
+      storedBytes !== undefined &&
+      storedBytes > this.config.maxFileSizeBytes
+    ) {
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.FAILED,
+        upload_id: null,
+        processing_error: OVERSIZE_REASON,
+      });
+      await this.abortUnrecordedUpload(video.storage_key!, video.upload_id!);
+      throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
+    }
+
     let uploadGone = false;
     try {
       await this.storageService.completeMultipartUpload(
@@ -285,7 +313,7 @@ export class VideosUploadService {
       await this.videoRepository.update(claimed, {
         status: VideoStatus.FAILED,
         upload_id: null,
-        processing_error: 'Uploaded object exceeded maximum allowed size',
+        processing_error: OVERSIZE_REASON,
       });
       try {
         await this.storageService.deleteObject(video.storage_key!);
@@ -340,8 +368,23 @@ export class VideosUploadService {
     }
   }
 
-  // No row will ever point at this upload, so neither abort nor the sweep
-  // could find it later: abort it now, keeping the caller's original error.
+  private async sumStoredParts(
+    video: Video,
+    parts: CompletedPartInput[],
+  ): Promise<number> {
+    const wanted = new Set(parts.map((p) => p.partNumber));
+    const stored = await this.storageService.listUploadedParts(
+      video.storage_key!,
+      video.upload_id!,
+    );
+    return stored
+      .filter((p) => wanted.has(p.partNumber))
+      .reduce((total, p) => total + p.sizeBytes, 0);
+  }
+
+  // No row points at this upload any more (draft never recorded it, or it was
+  // just failed), so neither abort nor the sweep could find it later: abort
+  // it now, keeping the caller's original error.
   private async abortUnrecordedUpload(
     storageKey: string,
     uploadId: string,

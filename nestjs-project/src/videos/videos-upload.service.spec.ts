@@ -40,6 +40,7 @@ describe('VideosUploadService', () => {
     getPresignedPartUrl: jest.fn(),
     completeMultipartUpload: jest.fn(),
     abortMultipartUpload: jest.fn(),
+    listUploadedParts: jest.fn().mockResolvedValue([]),
     headObject: jest.fn(),
     deleteObject: jest.fn(),
   };

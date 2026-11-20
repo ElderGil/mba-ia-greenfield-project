@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
+import { UploadLimitExceededException } from '../common/exceptions/domain.exception';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import {
   InvalidUploadPartsException,
@@ -369,6 +370,53 @@ describe('VideosUploadService (integration)', () => {
       storageService.listUploadedParts(created!.key, created!.uploadId),
     ).rejects.toMatchObject({ name: 'NoSuchUpload' });
     expect(await videoRepo.count()).toBe(0);
+  });
+
+  it('rejects parts above the size limit before storage assembles them, and aborts the upload', async () => {
+    const { user } = await createOwner();
+    const config = moduleRef.get<ConfigType<typeof videoConfig>>(
+      videoConfig.KEY,
+    );
+    const originalMax = config.maxFileSizeBytes;
+    config.maxFileSizeBytes = 1024;
+    const completeSpy = jest.spyOn(storageService, 'completeMultipartUpload');
+    try {
+      // Declared within the limit; the presigned PUT cannot enforce it.
+      const init = await uploadService.initiateUpload(user.id, {
+        title: 'Too big',
+        filename: 'big.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 1000,
+      });
+      createdKeys.push(init.storageKey);
+      const signed = await uploadService.signUploadPart(
+        user.id,
+        init.videoId,
+        1,
+      );
+      const put = await fetch(signed.presignedUrl, {
+        method: 'PUT',
+        body: new Uint8Array(4096),
+      });
+      expect(put.ok).toBe(true);
+
+      await expect(
+        uploadService.completeUpload(user.id, init.videoId, [
+          { partNumber: 1, etag: put.headers.get('etag')! },
+        ]),
+      ).rejects.toBeInstanceOf(UploadLimitExceededException);
+
+      expect(completeSpy).not.toHaveBeenCalled();
+      await expect(
+        storageService.listUploadedParts(init.storageKey, init.uploadId),
+      ).rejects.toMatchObject({ name: 'NoSuchUpload' });
+      const row = await videoRepo.findOneByOrFail({ id: init.videoId });
+      expect(row.status).toBe(VideoStatus.FAILED);
+      expect(row.upload_id).toBeNull();
+    } finally {
+      config.maxFileSizeBytes = originalMax;
+      completeSpy.mockRestore();
+    }
   });
 
   describe('races and ambiguous storage outcomes', () => {
