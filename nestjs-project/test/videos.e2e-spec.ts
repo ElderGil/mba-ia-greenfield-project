@@ -514,6 +514,69 @@ describe('Videos (e2e)', () => {
     expect((tooMany.body as ErrorBody).error).toBe('VALIDATION_ERROR');
   }, 30000);
 
+  it('lets a client that lost its state resume: list uploaded parts, then complete', async () => {
+    const { accessToken } = await registerConfirmAndLogin('resume');
+    const other = await registerConfirmAndLogin('resume_other');
+    const init = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Resume',
+        filename: 'r.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: sampleMp4.length,
+      })
+      .expect(201);
+    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+    const signed = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ partNumber: 1 })
+      .expect(200);
+    await fetch((signed.body as SignUploadPartResponseDto).presignedUrl, {
+      method: 'PUT',
+      body: new Uint8Array(sampleMp4),
+    });
+
+    // The client forgot the ETag (page reload): ask the API.
+    const listed = await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const { parts } = listed.body as {
+      parts: { partNumber: number; etag: string; sizeBytes: number }[];
+    };
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      partNumber: 1,
+      sizeBytes: sampleMp4.length,
+    });
+
+    await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${other.accessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        parts: parts.map(({ partNumber, etag }) => ({ partNumber, etag })),
+      })
+      .expect(202);
+    const settled = await pollVideoUntilSettled(accessToken, videoId);
+    expect(settled.status).toBe(VideoStatus.READY);
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    if (row.thumbnail_key) createdStorageKeys.push(row.thumbnail_key);
+
+    // Completed uploads have nothing left to list.
+    await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(409);
+  }, 30000);
+
   it('generates distinct unique shortCodes for multiple videos', async () => {
     const { accessToken } = await registerConfirmAndLogin('multi');
 

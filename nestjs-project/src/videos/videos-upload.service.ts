@@ -18,6 +18,7 @@ import {
   type CompletedPartInput,
   S3StorageService,
   type StorageObjectMetadata,
+  type UploadedPart,
 } from '../storage/s3-storage.service';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -178,6 +179,18 @@ export class VideosUploadService {
       presignedUrl,
       expiresInSeconds: this.config.presignedUrlExpiresInSeconds,
     };
+  }
+
+  // Lets a client that lost its ETags (reload, crash) resume the upload.
+  async listUploadedParts(
+    userId: string,
+    videoId: string,
+  ): Promise<UploadedPart[]> {
+    const video = await this.requireOwnedDraftVideo(userId, videoId);
+    return this.storageService.listUploadedParts(
+      video.storage_key!,
+      video.upload_id!,
+    );
   }
 
   async completeUpload(

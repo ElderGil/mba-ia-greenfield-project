@@ -33,6 +33,7 @@ import { SignUploadPartDto } from './dto/sign-upload-part.dto';
 import {
   CompleteUploadResponseDto,
   InitiateUploadResponseDto,
+  ListUploadedPartsResponseDto,
   SignUploadPartResponseDto,
   VideoOwnerResponseDto,
   VideoPublicResponseDto,
@@ -157,6 +158,50 @@ export class VideosController {
       id,
       dto.partNumber,
     );
+  }
+
+  @Get(':id/uploads/parts')
+  @ApiBearerAuth('access-token')
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({
+    summary: 'List the parts already uploaded for a draft',
+    description:
+      'Lets a client that lost its state (reload, crash) resume a multipart upload: returns the stored parts with their ETags, ready for /uploads/complete.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Uploaded parts, ascending by partNumber',
+    type: ListUploadedPartsResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden — video belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is no longer a draft with an open upload',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async listUploadedParts(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ListUploadedPartsResponseDto> {
+    const parts = await this.videosUploadService.listUploadedParts(
+      user.sub,
+      id,
+    );
+    return { parts };
   }
 
   @Post(':id/uploads/complete')

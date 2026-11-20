@@ -8,6 +8,7 @@ import {
   HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  ListPartsCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
@@ -21,6 +22,10 @@ import storageConfig from '../config/storage.config';
 export interface CompletedPartInput {
   partNumber: number;
   etag: string;
+}
+
+export interface UploadedPart extends CompletedPartInput {
+  sizeBytes: number;
 }
 
 export interface StorageObjectMetadata {
@@ -159,6 +164,40 @@ export class S3StorageService implements OnModuleInit {
         UploadId: uploadId,
       }),
     );
+  }
+
+  // Parts already stored for an open multipart upload (S3 pages at 1 000).
+  // Not paginateListParts: MinIO/silo answers the last page with
+  // NextPartNumberMarker "0", which the SDK paginator treats as a new token
+  // and loops on forever. IsTruncated is the S3 end-of-list signal.
+  async listUploadedParts(
+    key: string,
+    uploadId: string,
+    pageSize = 1000,
+  ): Promise<UploadedPart[]> {
+    const parts: UploadedPart[] = [];
+    let marker: string | undefined;
+    for (;;) {
+      const page = await this.client.send(
+        new ListPartsCommand({
+          Bucket: this.bucket,
+          Key: key,
+          UploadId: uploadId,
+          MaxParts: pageSize,
+          PartNumberMarker: marker,
+        }),
+      );
+      for (const part of page.Parts ?? []) {
+        if (part.PartNumber === undefined || !part.ETag) continue;
+        parts.push({
+          partNumber: part.PartNumber,
+          etag: part.ETag,
+          sizeBytes: part.Size ?? 0,
+        });
+      }
+      if (!page.IsTruncated || !page.NextPartNumberMarker) return parts;
+      marker = page.NextPartNumberMarker;
+    }
   }
 
   async headObject(key: string): Promise<StorageObjectMetadata> {

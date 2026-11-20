@@ -636,6 +636,82 @@
         "tags": [
           "videos"
         ]
+      },
+      "get": {
+        "description": "Lets a client that lost its state (reload, crash) resume a multipart upload: returns the stored parts with their ETags, ready for /uploads/complete.",
+        "operationId": "VideosController_listUploadedParts",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Uploaded parts, ascending by partNumber",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUploadedPartsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — video belongs to another channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is no longer a draft with an open upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List the parts already uploaded for a draft",
+        "tags": [
+          "videos"
+        ]
       }
     },
     "/videos/{id}/uploads/complete": {
@@ -1261,6 +1337,42 @@
           "partNumber",
           "presignedUrl",
           "expiresInSeconds"
+        ]
+      },
+      "UploadedPartResponseDto": {
+        "type": "object",
+        "properties": {
+          "partNumber": {
+            "type": "number",
+            "example": 1
+          },
+          "etag": {
+            "type": "string",
+            "example": "\"d41d8cd98f00b204e9800998ecf8427e\""
+          },
+          "sizeBytes": {
+            "type": "number",
+            "example": 10485760
+          }
+        },
+        "required": [
+          "partNumber",
+          "etag",
+          "sizeBytes"
+        ]
+      },
+      "ListUploadedPartsResponseDto": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadedPartResponseDto"
+            }
+          }
+        },
+        "required": [
+          "parts"
         ]
       },
       "UploadPartEtagDto": {

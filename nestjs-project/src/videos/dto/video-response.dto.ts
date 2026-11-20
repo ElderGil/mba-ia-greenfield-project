@@ -35,6 +35,22 @@ export class SignUploadPartResponseDto {
   expiresInSeconds: number;
 }
 
+export class UploadedPartResponseDto {
+  @ApiProperty({ example: 1 })
+  partNumber: number;
+
+  @ApiProperty({ example: '"d41d8cd98f00b204e9800998ecf8427e"' })
+  etag: string;
+
+  @ApiProperty({ example: 10485760 })
+  sizeBytes: number;
+}
+
+export class ListUploadedPartsResponseDto {
+  @ApiProperty({ type: [UploadedPartResponseDto] })
+  parts: UploadedPartResponseDto[];
+}
+
 export class CompleteUploadResponseDto {
   @ApiProperty({ format: 'uuid' })
   videoId: string;
