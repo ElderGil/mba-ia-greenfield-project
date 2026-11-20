@@ -5,7 +5,10 @@ import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VideoInvalidStateException } from '../common/exceptions/domain.exception';
+import {
+  InvalidUploadPartsException,
+  VideoInvalidStateException,
+} from '../common/exceptions/domain.exception';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
@@ -153,6 +156,81 @@ describe('VideosUploadService (integration)', () => {
     expect(job).toBeDefined();
     expect(job!.data.videoId).toBe(init.videoId);
     expect(job!.data.storageKey).toBe(init.storageKey);
+  });
+
+  async function initiateAndUploadParts(
+    userId: string,
+    parts: Buffer[],
+  ): Promise<{
+    videoId: string;
+    uploaded: { partNumber: number; etag: string }[];
+  }> {
+    const total = parts.reduce((sum, p) => sum + p.length, 0);
+    const init = await uploadService.initiateUpload(userId, {
+      title: 'Multipart Clip',
+      filename: 'multi.mp4',
+      mimeType: 'video/mp4',
+      sizeBytes: total,
+    });
+    createdKeys.push(init.storageKey);
+    const uploaded: { partNumber: number; etag: string }[] = [];
+    for (const [i, body] of parts.entries()) {
+      const signed = await uploadService.signUploadPart(
+        userId,
+        init.videoId,
+        i + 1,
+      );
+      const putRes = await fetch(signed.presignedUrl, {
+        method: 'PUT',
+        body: new Uint8Array(body),
+      });
+      expect(putRes.ok).toBe(true);
+      uploaded.push({ partNumber: i + 1, etag: putRes.headers.get('etag')! });
+    }
+    return { videoId: init.videoId, uploaded };
+  }
+
+  it('assembles a multi-part upload whose parts are listed out of order', async () => {
+    const { user } = await createOwner();
+    const first = Buffer.alloc(5 * 1024 * 1024, 0x61); // S3 minimum for non-last parts
+    const tail = Buffer.alloc(1024 * 1024, 0x62);
+    const { videoId, uploaded } = await initiateAndUploadParts(user.id, [
+      first,
+      tail,
+    ]);
+
+    await uploadService.completeUpload(
+      user.id,
+      videoId,
+      [...uploaded].reverse(),
+    );
+
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    expect(row.status).toBe(VideoStatus.PROCESSING);
+    expect(Number(row.size_bytes)).toBe(first.length + tail.length);
+    const range = await storageService.getObjectStream(
+      row.storage_key!,
+      `bytes=${first.length - 1}-${first.length}`,
+    );
+    const boundary: Buffer[] = [];
+    for await (const chunk of range.stream) boundary.push(chunk as Buffer);
+    expect(Buffer.concat(boundary).toString()).toBe('ab');
+  });
+
+  it('rejects a non-last part below the S3 minimum and keeps the draft retryable', async () => {
+    const { user } = await createOwner();
+    const { videoId, uploaded } = await initiateAndUploadParts(user.id, [
+      Buffer.alloc(1024, 0x61),
+      Buffer.alloc(1024, 0x62),
+    ]);
+
+    await expect(
+      uploadService.completeUpload(user.id, videoId, uploaded),
+    ).rejects.toThrow(InvalidUploadPartsException);
+
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    expect(row.status).toBe(VideoStatus.DRAFT);
+    expect(row.upload_id).not.toBeNull();
   });
 
   async function initiateAndUploadOnePart(
