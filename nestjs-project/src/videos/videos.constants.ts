@@ -13,3 +13,8 @@ export const MIME_TO_EXTENSION: Record<string, string> = {
 };
 
 export const MAX_MULTIPART_PARTS = 10000;
+
+// Upload initiation is the only video route under the global throttler:
+// public media routes stay unlimited because players issue many range
+// requests per view.
+export const INITIATE_UPLOAD_THROTTLE = { limit: 10, ttl: 60_000 } as const;

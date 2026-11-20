@@ -12,7 +12,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -38,6 +38,7 @@ import {
   VideoPublicResponseDto,
 } from './dto/video-response.dto';
 import { buildContentDisposition, sendMedia } from './videos-http.util';
+import { INITIATE_UPLOAD_THROTTLE } from './videos.constants';
 import { VideosUploadService } from './videos-upload.service';
 import { VideosService } from './videos.service';
 
@@ -53,6 +54,8 @@ export class VideosController {
   ) {}
 
   @Post('uploads/initiate')
+  @SkipThrottle({ default: false })
+  @Throttle({ default: INITIATE_UPLOAD_THROTTLE })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Initiate multipart video upload',
@@ -88,6 +91,15 @@ export class VideosController {
     status: 415,
     description: 'Unsupported media type',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Channel already has the maximum number of open uploads',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many upload initiations; retry later',
   })
   async initiateUpload(
     @CurrentUser() user: JwtPayload,

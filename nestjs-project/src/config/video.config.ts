@@ -16,4 +16,6 @@ export default registerAs('video', () => ({
     process.env.VIDEO_PRESIGNED_URL_EXPIRES_IN || '900',
     10,
   ),
+  // Open drafts hold an S3 multipart upload; cap them per channel.
+  maxOpenDrafts: parseInt(process.env.VIDEO_MAX_OPEN_DRAFTS || '5', 10),
 }));

@@ -6,6 +6,7 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   InvalidUploadPartsException,
+  TooManyOpenUploadsException,
   UnsupportedMediaTypeException,
   UploadLimitExceededException,
   VideoAccessDeniedException,
@@ -116,6 +117,15 @@ export class VideosUploadService {
     const channel = await this.channelsService.findByUserId(userId);
     if (!channel) {
       throw new ChannelNotFoundException();
+    }
+
+    // Soft cap: two concurrent initiates may both pass the count, so the
+    // bound is maxOpenDrafts + concurrency, which is enough against abuse.
+    const openDrafts = await this.videoRepository.count({
+      where: { channel_id: channel.id, status: VideoStatus.DRAFT },
+    });
+    if (openDrafts >= this.config.maxOpenDrafts) {
+      throw new TooManyOpenUploadsException(this.config.maxOpenDrafts);
     }
 
     const video = await this.createDraftVideoWithUniqueShortCode(

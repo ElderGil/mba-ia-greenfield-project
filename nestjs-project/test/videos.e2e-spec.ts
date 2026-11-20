@@ -442,6 +442,35 @@ describe('Videos (e2e)', () => {
     }
   }, 30000);
 
+  it('caps open drafts per channel and rate-limits upload initiation', async () => {
+    const { accessToken } = await registerConfirmAndLogin('limits');
+    const initiate = (mimeType = 'video/mp4') =>
+      request(app.getHttpServer())
+        .post('/videos/uploads/initiate')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ title: 'Draft', filename: 'a.mp4', mimeType, sizeBytes: 1024 });
+
+    for (let i = 0; i < 5; i++) {
+      const res = await initiate().expect(201);
+      createdStorageKeys.push(
+        (res.body as InitiateUploadResponseDto).storageKey,
+      );
+    }
+    const capped = await initiate().expect(409);
+    expect((capped.body as ErrorBody).error).toBe('TOO_MANY_OPEN_UPLOADS');
+
+    // 6 requests so far; rejected ones count too. The 11th within a minute is throttled.
+    for (let i = 0; i < 4; i++) await initiate('application/pdf').expect(415);
+    await initiate('application/pdf').expect(429);
+
+    // Public media routes stay unthrottled (players issue many range requests).
+    for (let i = 0; i < 12; i++) {
+      await request(app.getHttpServer())
+        .get('/videos/nonexistent0/stream')
+        .expect(404);
+    }
+  });
+
   it('generates distinct unique shortCodes for multiple videos', async () => {
     const { accessToken } = await registerConfirmAndLogin('multi');
 

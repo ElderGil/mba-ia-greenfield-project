@@ -79,6 +79,16 @@ export class VideoInvalidStateException extends DomainException {
   }
 }
 
+export class TooManyOpenUploadsException extends DomainException {
+  constructor(limit: number) {
+    super(
+      'TOO_MANY_OPEN_UPLOADS',
+      409,
+      `Channel already has ${limit} uploads in progress; complete or abort one first`,
+    );
+  }
+}
+
 export class UploadLimitExceededException extends DomainException {
   constructor(maxBytes: number) {
     super(
