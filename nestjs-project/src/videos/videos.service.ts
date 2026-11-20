@@ -21,6 +21,7 @@ export interface ParsedByteRange {
 // before the body never touch the object store.
 export interface VideoStreamPayload {
   open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength: number;
   totalSize: number;
@@ -30,6 +31,7 @@ export interface VideoStreamPayload {
 
 export interface VideoDownloadPayload {
   open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength: number;
   filename: string;
@@ -37,8 +39,15 @@ export interface VideoDownloadPayload {
 
 export interface VideoThumbnailPayload {
   open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength?: number;
+}
+
+// A ready video's bytes never change (there is no re-upload), so id + size
+// is a stable strong validator.
+function mediaEtag(video: Video): string {
+  return `"${video.id}-${video.size_bytes}"`;
 }
 
 @Injectable()
@@ -161,6 +170,7 @@ export class VideosService {
       const range = `bytes=${start}-${end}`;
       return {
         open: () => this.storageService.getObjectStream(storageKey, range),
+        etag: mediaEtag(video),
         contentType: video.mime_type,
         contentLength: end - start + 1,
         totalSize,
@@ -171,6 +181,7 @@ export class VideosService {
 
     return {
       open: () => this.storageService.getObjectStream(storageKey),
+      etag: mediaEtag(video),
       contentType: video.mime_type,
       contentLength: totalSize,
       totalSize,
@@ -184,6 +195,7 @@ export class VideosService {
 
     return {
       open: () => this.storageService.getObjectStream(storageKey),
+      etag: mediaEtag(video),
       contentType: video.mime_type,
       contentLength: Number(video.size_bytes),
       filename: video.original_filename,
@@ -199,6 +211,7 @@ export class VideosService {
     const thumbnailKey = video.thumbnail_key;
     return {
       open: () => this.storageService.getObjectStream(thumbnailKey),
+      etag: `"${video.id}-thumb"`,
       contentType: 'image/jpeg',
     };
   }

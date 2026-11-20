@@ -10,6 +10,8 @@ export interface MediaReply {
   status: number;
   headers: Record<string, string>;
   open: () => Promise<OpenedMedia>;
+  // Strong validator; ready media never changes, so it can be revalidated.
+  etag?: string;
 }
 
 const FALLBACK_FILENAME = 'video.mp4';
@@ -45,6 +47,7 @@ export function buildContentDisposition(filename: string): string {
 /**
  * Sends a media body without buffering it.
  *
+ * - A matching If-None-Match gets 304 without touching storage.
  * - HEAD gets the headers only; the storage object is never opened.
  * - Headers are written only after the source opened, so a storage error
  *   still reaches the exception filter as a normal JSON error.
@@ -53,14 +56,29 @@ export function buildContentDisposition(filename: string): string {
  * - pipeline() tears down both sides when either one fails mid-body.
  */
 export async function sendMedia(
-  req: Pick<Request, 'method'>,
+  req: Pick<Request, 'method' | 'headers'>,
   res: Response,
   reply: MediaReply,
   onSourceError: (err: Error) => void,
 ): Promise<void> {
+  const headers = reply.etag
+    ? { ...reply.headers, ETag: reply.etag, 'Cache-Control': 'no-cache' }
+    : reply.headers;
+
+  if (
+    reply.etag &&
+    matchesIfNoneMatch(req.headers['if-none-match'], reply.etag)
+  ) {
+    res.status(304);
+    res.setHeader('ETag', reply.etag);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.end();
+    return;
+  }
+
   if (req.method === 'HEAD') {
     res.status(reply.status);
-    setHeaders(res, reply.headers);
+    setHeaders(res, headers);
     res.end();
     return;
   }
@@ -84,7 +102,7 @@ export async function sendMedia(
   }
 
   res.status(reply.status);
-  setHeaders(res, reply.headers);
+  setHeaders(res, headers);
   if (
     reply.headers['Content-Length'] === undefined &&
     opened.contentLength !== undefined
@@ -96,6 +114,19 @@ export async function sendMedia(
     // A client closing the connection is normal (seek, tab closed).
     if (err && !clientClosed(res, err)) onSourceError(err);
   });
+}
+
+// RFC 9110 §13.1.2: weak comparison, list of tags or "*".
+function matchesIfNoneMatch(
+  header: string | string[] | undefined,
+  etag: string,
+): boolean {
+  if (!header) return false;
+  const opaque = (tag: string): string => tag.trim().replace(/^W\//, '');
+  const wanted = opaque(etag);
+  return String(header)
+    .split(',')
+    .some((tag) => tag.trim() === '*' || opaque(tag) === wanted);
 }
 
 function setHeaders(res: Response, headers: Record<string, string>): void {

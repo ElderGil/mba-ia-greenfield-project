@@ -335,6 +335,10 @@ export class VideosController {
   @ApiResponse({ status: 206, description: 'Partial video byte stream' })
   @ApiResponse({ status: 200, description: 'Full video byte stream' })
   @ApiResponse({
+    status: 304,
+    description: 'Not modified (If-None-Match matched the ETag)',
+  })
+  @ApiResponse({
     status: 404,
     description: 'Video not found or not ready',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
@@ -366,6 +370,7 @@ export class VideosController {
         status: payload.isPartial ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
         headers,
         open: payload.open,
+        etag: payload.etag,
       },
       (err) => this.logSourceError(shortCode, err),
     );
@@ -379,6 +384,10 @@ export class VideosController {
       'Streams the full video file with Content-Disposition: attachment.',
   })
   @ApiResponse({ status: 200, description: 'Video file download stream' })
+  @ApiResponse({
+    status: 304,
+    description: 'Not modified (If-None-Match matched the ETag)',
+  })
   @ApiResponse({
     status: 404,
     description: 'Video not found or not ready',
@@ -401,6 +410,7 @@ export class VideosController {
           'Content-Disposition': buildContentDisposition(payload.filename),
         },
         open: payload.open,
+        etag: payload.etag,
       },
       (err) => this.logSourceError(shortCode, err),
     );
@@ -414,6 +424,10 @@ export class VideosController {
       'Streams the JPEG thumbnail extracted from the video frame during background processing.',
   })
   @ApiResponse({ status: 200, description: 'JPEG thumbnail image' })
+  @ApiResponse({
+    status: 304,
+    description: 'Not modified (If-None-Match matched the ETag)',
+  })
   @ApiResponse({
     status: 404,
     description: 'Video not found or not ready',
@@ -432,6 +446,7 @@ export class VideosController {
         status: HttpStatus.OK,
         headers: { 'Content-Type': payload.contentType },
         open: payload.open,
+        etag: payload.etag,
       },
       (err) => this.logSourceError(shortCode, err),
     );

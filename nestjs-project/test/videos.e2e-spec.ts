@@ -287,6 +287,15 @@ describe('Videos (e2e)', () => {
     expect(thumbBuf[0]).toBe(0xff);
     expect(thumbBuf[1]).toBe(0xd8);
 
+    // Revalidation: same ETag answers 304 without a body
+    const thumbEtag: string = thumbRes.headers['etag'];
+    expect(thumbEtag).toMatch(/^"[^"]+"$/);
+    expect(thumbRes.headers['cache-control']).toBe('no-cache');
+    await request(app.getHttpServer())
+      .get(`/videos/${shortCode}/thumbnail`)
+      .set('If-None-Match', thumbEtag)
+      .expect(304);
+
     // 7. Byte-Range streaming (206 Partial Content) without full download
     const streamRes1 = await request(app.getHttpServer())
       .get(`/videos/${shortCode}/stream`)

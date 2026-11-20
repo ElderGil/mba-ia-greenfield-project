@@ -985,6 +985,9 @@
           "206": {
             "description": "Partial video byte stream"
           },
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
+          },
           "404": {
             "description": "Video not found or not ready",
             "content": {
@@ -1030,6 +1033,9 @@
           "200": {
             "description": "Video file download stream"
           },
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
+          },
           "404": {
             "description": "Video not found or not ready",
             "content": {
@@ -1064,6 +1070,9 @@
         "responses": {
           "200": {
             "description": "JPEG thumbnail image"
+          },
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
           },
           "404": {
             "description": "Video not found or not ready",

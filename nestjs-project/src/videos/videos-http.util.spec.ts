@@ -61,11 +61,54 @@ describe('videos-http.util', () => {
   });
 
   describe('sendMedia', () => {
+    it('should answer 304 without opening the source when If-None-Match matches', async () => {
+      const res = fakeResponse();
+      const open = jest.fn();
+
+      await sendMedia(
+        { method: 'GET', headers: { 'if-none-match': 'W/"other", "v1-4"' } },
+        res,
+        { ...reply(open), etag: '"v1-4"' },
+        jest.fn(),
+      );
+
+      expect(open).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(304);
+      expect(res.setHeader).toHaveBeenCalledWith('ETag', '"v1-4"');
+      expect(res.setHeader).not.toHaveBeenCalledWith('Content-Length', '4');
+      expect(res.writableEnded).toBe(true);
+    });
+
+    it('should send ETag and Cache-Control with the body when the tag does not match', async () => {
+      const res = fakeResponse();
+
+      await sendMedia(
+        { method: 'GET', headers: { 'if-none-match': '"stale"' } },
+        res,
+        {
+          ...reply(() =>
+            Promise.resolve({ stream: Readable.from([Buffer.from('abcd')]) }),
+          ),
+          etag: '"v1-4"',
+        },
+        jest.fn(),
+      );
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.setHeader).toHaveBeenCalledWith('ETag', '"v1-4"');
+      expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
+    });
+
     it('should answer HEAD with headers only and never open the source', async () => {
       const res = fakeResponse();
       const open = jest.fn();
 
-      await sendMedia({ method: 'HEAD' }, res, reply(open), jest.fn());
+      await sendMedia(
+        { method: 'HEAD', headers: {} },
+        res,
+        reply(open),
+        jest.fn(),
+      );
 
       expect(open).not.toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(200);
@@ -81,7 +124,12 @@ describe('videos-http.util', () => {
         return Promise.resolve({ stream: source });
       });
 
-      await sendMedia({ method: 'GET' }, res, reply(open), jest.fn());
+      await sendMedia(
+        { method: 'GET', headers: {} },
+        res,
+        reply(open),
+        jest.fn(),
+      );
 
       expect(source.destroyed).toBe(true);
       expect(res.setHeader).not.toHaveBeenCalled();
@@ -92,7 +140,7 @@ describe('videos-http.util', () => {
       const open = jest.fn().mockRejectedValue(new Error('NoSuchKey'));
 
       await expect(
-        sendMedia({ method: 'GET' }, res, reply(open), jest.fn()),
+        sendMedia({ method: 'GET', headers: {} }, res, reply(open), jest.fn()),
       ).rejects.toThrow('NoSuchKey');
       expect(res.setHeader).not.toHaveBeenCalled();
     });
@@ -103,7 +151,7 @@ describe('videos-http.util', () => {
       const onError = jest.fn();
 
       await sendMedia(
-        { method: 'GET' },
+        { method: 'GET', headers: {} },
         res,
         reply(() => Promise.resolve({ stream: source })),
         onError,
@@ -124,7 +172,7 @@ describe('videos-http.util', () => {
       const onError = jest.fn();
 
       await sendMedia(
-        { method: 'GET' },
+        { method: 'GET', headers: {} },
         res,
         reply(() => Promise.resolve({ stream: source })),
         onError,
@@ -140,7 +188,7 @@ describe('videos-http.util', () => {
       const res = fakeResponse();
 
       await sendMedia(
-        { method: 'GET' },
+        { method: 'GET', headers: {} },
         res,
         {
           status: 200,
