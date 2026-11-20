@@ -17,6 +17,8 @@ describe('S3StorageService (integration)', () => {
   let moduleRef: TestingModule;
   let storageService: S3StorageService;
   const createdKeys: string[] = [];
+  // A test failing mid-way must not leave its multipart upload behind.
+  const openUploads: { key: string; uploadId: string }[] = [];
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
@@ -34,6 +36,12 @@ describe('S3StorageService (integration)', () => {
   });
 
   afterAll(async () => {
+    for (const { key, uploadId } of openUploads) {
+      // NoSuchUpload once completed or aborted by the test itself.
+      await storageService
+        .abortMultipartUpload(key, uploadId)
+        .catch(() => undefined);
+    }
     for (const key of createdKeys) {
       await storageService.deleteObject(key).catch(() => undefined);
     }
@@ -106,6 +114,8 @@ describe('S3StorageService (integration)', () => {
       key,
       'video/mp4',
     );
+
+    openUploads.push({ key, uploadId });
     expect(uploadId).toBeTruthy();
 
     const presignedUrl = await storageService.getPresignedPartUrl(
@@ -144,6 +154,7 @@ describe('S3StorageService (integration)', () => {
       key,
       'video/mp4',
     );
+    openUploads.push({ key, uploadId });
     const etags: string[] = [];
     for (const partNumber of [1, 2]) {
       const url = await storageService.getPresignedPartUrl(
@@ -175,6 +186,7 @@ describe('S3StorageService (integration)', () => {
       key,
       'video/mp4',
     );
+    openUploads.push({ key, uploadId });
     await expect(
       storageService.abortMultipartUpload(key, uploadId),
     ).resolves.toBeUndefined();
