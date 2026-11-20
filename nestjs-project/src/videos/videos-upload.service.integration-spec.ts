@@ -155,7 +155,7 @@ describe('VideosUploadService (integration)', () => {
     const job = await queue.getJob(completed.jobId);
     expect(job).toBeDefined();
     expect(job!.data.videoId).toBe(init.videoId);
-    expect(job!.data.storageKey).toBe(init.storageKey);
+    expect(job!.data).toEqual({ videoId: init.videoId });
   });
 
   async function initiateAndUploadParts(

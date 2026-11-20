@@ -173,12 +173,7 @@ describe('VideoMaintenanceService (integration)', () => {
     // A backlog: the job exists and is still waiting for a worker.
     await queue.add(
       'process-video',
-      {
-        videoId: queued.videoId,
-        channelId: 'c',
-        storageKey: queued.storageKey,
-        mimeType: 'video/mp4',
-      },
+      { videoId: queued.videoId },
       { jobId: `process-video-${queued.videoId}` },
     );
 

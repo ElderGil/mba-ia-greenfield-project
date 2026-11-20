@@ -41,12 +41,7 @@ describe('VideoProcessingProcessor', () => {
 
   const job = {
     id: 'process-video-v1',
-    data: {
-      videoId: 'v1',
-      channelId: 'c1',
-      storageKey: 'videos/c1/v1/original.mp4',
-      mimeType: 'video/mp4',
-    },
+    data: { videoId: 'v1' },
     attemptsMade: 1,
     opts: { attempts: 3 },
   } as unknown as Job<VideoProcessingJobData>;
@@ -54,8 +49,12 @@ describe('VideoProcessingProcessor', () => {
   it('probes video, uploads thumbnail, and marks video ready', async () => {
     mockVideoRepo.findOne.mockResolvedValue({
       id: 'v1',
+      channel_id: 'c1',
+      status: VideoStatus.PROCESSING,
+      storage_key: 'videos/c1/v1/original.webm',
       mime_type: 'video/webm',
     });
+    mockVideoRepo.update.mockResolvedValue({ affected: 1 });
     mockStorageService.getPresignedGetUrl.mockResolvedValue(
       'http://minio:9000/signed',
     );
@@ -70,6 +69,10 @@ describe('VideoProcessingProcessor', () => {
 
     await processor.process(job);
 
+    expect(mockStorageService.getPresignedGetUrl).toHaveBeenCalledWith(
+      'videos/c1/v1/original.webm',
+      900,
+    );
     // The stored MIME (not auto-detection) drives the demuxer.
     expect(mockMediaProcessor.probeVideo).toHaveBeenCalledWith(
       'http://minio:9000/signed',
@@ -86,7 +89,7 @@ describe('VideoProcessingProcessor', () => {
       'image/jpeg',
     );
     expect(mockVideoRepo.update).toHaveBeenCalledWith(
-      { id: 'v1' },
+      { id: 'v1', status: VideoStatus.PROCESSING },
       {
         status: VideoStatus.READY,
         thumbnail_key: 'thumbnails/c1/v1/thumb.jpg',
@@ -122,7 +125,7 @@ describe('VideoProcessingProcessor', () => {
     );
 
     expect(mockVideoRepo.update).toHaveBeenCalledWith(
-      { id: 'v1' },
+      { id: 'v1', status: VideoStatus.PROCESSING },
       {
         status: VideoStatus.FAILED,
         processing_error: 'job stalled more than allowable limit',
@@ -161,11 +164,24 @@ describe('VideoProcessingProcessor', () => {
     await processor.onFailed(exhaustedJob, new Error('corrupt stream'));
 
     expect(mockVideoRepo.update).toHaveBeenCalledWith(
-      { id: 'v1' },
+      { id: 'v1', status: VideoStatus.PROCESSING },
       {
         status: VideoStatus.FAILED,
         processing_error: 'corrupt stream',
       },
     );
+  });
+
+  it('should not let a database error escape the failed listener, since it would crash the worker', async () => {
+    const exhaustedJob = {
+      ...job,
+      attemptsMade: 3,
+      opts: { attempts: 3 },
+    } as unknown as Job<VideoProcessingJobData>;
+    mockVideoRepo.update.mockRejectedValueOnce(new Error('connection lost'));
+
+    await expect(
+      processor.onFailed(exhaustedJob, new Error('corrupt stream')),
+    ).resolves.toBeUndefined();
   });
 });

@@ -308,9 +308,6 @@ export class VideosUploadService {
     try {
       jobId = await this.queueService.enqueueProcessVideo({
         videoId: video.id,
-        channelId: video.channel_id,
-        storageKey: video.storage_key!,
-        mimeType: video.mime_type,
       });
     } catch (err) {
       // Without a job nothing would ever move the video out of processing.

@@ -13,9 +13,10 @@ export const VIDEO_MAINTENANCE_EVERY_MS = 15 * 60_000;
 // Completed/failed sweep jobs kept in Redis (about a day at one per 15 min).
 export const VIDEO_MAINTENANCE_KEEP_JOBS = 100;
 
+// The job only names the video; the worker reads everything else (storage
+// key, channel, MIME, status) from its row, the single source of truth.
+// Jobs queued before this change also carry channelId, storageKey and
+// mimeType: they are accepted and those fields ignored.
 export interface VideoProcessingJobData {
   videoId: string;
-  channelId: string;
-  storageKey: string;
-  mimeType: string;
 }

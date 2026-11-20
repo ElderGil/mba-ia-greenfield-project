@@ -279,9 +279,6 @@ describe('VideosUploadService', () => {
       });
       expect(mockQueueService.enqueueProcessVideo).toHaveBeenCalledWith({
         videoId: 'vid-1',
-        channelId: 'chan-1',
-        storageKey: 'videos/chan-1/vid-1/original.mp4',
-        mimeType: 'video/mp4',
       });
     });
 
