@@ -1,14 +1,11 @@
 import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../../auth/entities/verification-token.entity';
 import {
   cleanAllTables,
   createTestDataSource,
 } from '../../test/create-test-data-source';
 import { User } from '../../users/entities/user.entity';
 import { Channel } from './channel.entity';
-
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+import { ALL_ENTITIES } from '../../test/test-entities';
 
 describe('Channel entity (integration)', () => {
   let dataSource: DataSource;
@@ -39,6 +36,15 @@ describe('Channel entity (integration)', () => {
       }),
     );
   }
+
+  it('should map both sides of the channel-videos relation (entity rule)', () => {
+    const relation = dataSource
+      .getMetadata(Channel)
+      .relations.find((r) => r.propertyName === 'videos');
+
+    expect(relation?.relationType).toBe('one-to-many');
+    expect(relation?.inverseSidePropertyPath).toBe('channel');
+  });
 
   it('should enforce unique nickname constraint', async () => {
     const user1 = await createUser();
