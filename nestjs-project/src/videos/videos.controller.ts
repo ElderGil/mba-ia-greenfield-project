@@ -310,12 +310,7 @@ export class VideosController {
   })
   @ApiResponse({
     status: 404,
-    description: 'Video not found',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Video is not ready for playback',
+    description: 'Video not found or not ready',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async getPublicVideo(
@@ -341,12 +336,7 @@ export class VideosController {
   @ApiResponse({ status: 200, description: 'Full video byte stream' })
   @ApiResponse({
     status: 404,
-    description: 'Video not found',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Video is not ready for playback',
+    description: 'Video not found or not ready',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({
@@ -391,12 +381,7 @@ export class VideosController {
   @ApiResponse({ status: 200, description: 'Video file download stream' })
   @ApiResponse({
     status: 404,
-    description: 'Video not found',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Video is not ready for download',
+    description: 'Video not found or not ready',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async downloadVideo(
@@ -431,12 +416,7 @@ export class VideosController {
   @ApiResponse({ status: 200, description: 'JPEG thumbnail image' })
   @ApiResponse({
     status: 404,
-    description: 'Video not found',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Video is not ready',
+    description: 'Video not found or not ready',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async getThumbnail(

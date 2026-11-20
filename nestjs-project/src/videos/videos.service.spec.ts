@@ -7,7 +7,6 @@ import {
   InvalidRangeException,
   VideoAccessDeniedException,
   VideoNotFoundException,
-  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -134,7 +133,7 @@ describe('VideosService', () => {
       );
     });
 
-    it('throws VideoNotReadyException when video is still processing', async () => {
+    it('hides a video that is not ready behind VideoNotFoundException', async () => {
       mockVideoRepo.findOne.mockResolvedValue({
         id: 'v1',
         short_code: 'abc12345678',
@@ -144,7 +143,7 @@ describe('VideosService', () => {
 
       await expect(
         service.getReadyVideoByShortCode('abc12345678'),
-      ).rejects.toThrow(VideoNotReadyException);
+      ).rejects.toThrow(VideoNotFoundException);
     });
   });
 

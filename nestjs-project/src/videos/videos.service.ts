@@ -7,7 +7,6 @@ import {
   InvalidRangeException,
   VideoAccessDeniedException,
   VideoNotFoundException,
-  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -91,8 +90,9 @@ export class VideosService {
       throw new VideoNotFoundException();
     }
 
+    // Public routes must not reveal that an unpublished shortCode exists.
     if (video.status !== VideoStatus.READY || !video.storage_key) {
-      throw new VideoNotReadyException();
+      throw new VideoNotFoundException();
     }
 
     return video;
@@ -193,7 +193,7 @@ export class VideosService {
   async getThumbnailStream(shortCode: string): Promise<VideoThumbnailPayload> {
     const video = await this.getReadyVideoByShortCode(shortCode);
     if (!video.thumbnail_key) {
-      throw new VideoNotReadyException();
+      throw new VideoNotFoundException();
     }
 
     const thumbnailKey = video.thumbnail_key;

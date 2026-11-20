@@ -198,7 +198,8 @@ describe('Videos (e2e)', () => {
     expect(shortCode).toMatch(/^[A-Za-z0-9_-]{11}$/);
     expect(initBody.status).toBe(VideoStatus.DRAFT);
 
-    // Draft appears in /videos/me, but public playback returns 409 VIDEO_NOT_READY
+    // Draft appears in /videos/me; public routes answer 404 so a shortCode
+    // does not reveal that an unpublished video exists
     const myVideos = await request(app.getHttpServer())
       .get('/videos/me')
       .set('Authorization', `Bearer ${accessToken}`)
@@ -207,7 +208,12 @@ describe('Videos (e2e)', () => {
     expect(myVideosList).toHaveLength(1);
     expect(myVideosList[0].status).toBe(VideoStatus.DRAFT);
 
-    await request(app.getHttpServer()).get(`/videos/${shortCode}`).expect(409);
+    for (const suffix of ['', '/stream', '/download', '/thumbnail']) {
+      const hidden = await request(app.getHttpServer())
+        .get(`/videos/${shortCode}${suffix}`)
+        .expect(404);
+      expect((hidden.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+    }
 
     // 2. Request presigned part URL and PUT bytes directly to MinIO
     const partRes = await request(app.getHttpServer())
@@ -250,8 +256,11 @@ describe('Videos (e2e)', () => {
     expect(settled.width).toBe(320);
     expect(settled.height).toBe(240);
     expect(settled.codec).toBe('h264');
-    expect(settled.thumbnailKey).toBeTruthy();
-    createdStorageKeys.push(settled.thumbnailKey!);
+    expect(settled.thumbnailUrl).toBe(`/videos/${shortCode}/thumbnail`);
+    expect(settled).not.toHaveProperty('thumbnailKey');
+    createdStorageKeys.push(
+      (await videoRepo.findOneByOrFail({ id: videoId })).thumbnail_key!,
+    );
 
     // 5. Public metadata (@Public)
     const publicMeta = await request(app.getHttpServer())
@@ -375,7 +384,8 @@ describe('Videos (e2e)', () => {
 
     const settled = await pollVideoUntilSettled(accessToken, videoId);
     expect(settled.status).toBe(VideoStatus.READY);
-    if (settled.thumbnailKey) createdStorageKeys.push(settled.thumbnailKey);
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    if (row.thumbnail_key) createdStorageKeys.push(row.thumbnail_key);
     return { shortCode };
   }
 

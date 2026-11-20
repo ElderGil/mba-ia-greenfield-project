@@ -86,8 +86,11 @@ export class VideoOwnerResponseDto {
   @ApiPropertyOptional({ nullable: true })
   codec: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
-  thumbnailKey: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Public thumbnail URL once the video is ready',
+  })
+  thumbnailUrl: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   processingError: string | null;
@@ -112,7 +115,10 @@ export class VideoOwnerResponseDto {
       width: video.width,
       height: video.height,
       codec: video.codec,
-      thumbnailKey: video.thumbnail_key,
+      thumbnailUrl:
+        video.status === VideoStatus.READY && video.thumbnail_key
+          ? `/videos/${video.short_code}/thumbnail`
+          : null,
       processingError: video.processing_error,
       createdAt: video.created_at,
       updatedAt: video.updated_at,

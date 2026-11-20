@@ -939,17 +939,7 @@
             }
           },
           "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Video is not ready for playback",
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -996,17 +986,7 @@
             "description": "Partial video byte stream"
           },
           "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Video is not ready for playback",
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1051,17 +1031,7 @@
             "description": "Video file download stream"
           },
           "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Video is not ready for download",
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1096,17 +1066,7 @@
             "description": "JPEG thumbnail image"
           },
           "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Video is not ready",
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1398,9 +1358,10 @@
             "type": "object",
             "nullable": true
           },
-          "thumbnailKey": {
+          "thumbnailUrl": {
             "type": "object",
-            "nullable": true
+            "nullable": true,
+            "description": "Public thumbnail URL once the video is ready"
           },
           "processingError": {
             "type": "object",
