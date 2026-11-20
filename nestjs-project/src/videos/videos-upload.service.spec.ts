@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
@@ -398,25 +399,63 @@ describe('VideosUploadService', () => {
       });
     });
 
-    it('aborts multipart upload and deletes draft record', async () => {
-      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
-      mockVideoRepo.findOne.mockResolvedValue({
-        id: 'vid-1',
-        channel_id: 'chan-1',
-        status: VideoStatus.DRAFT,
-        upload_id: 'up-1',
-        storage_key: 'videos/chan-1/vid-1/original.mp4',
+    describe('abortUpload', () => {
+      beforeEach(() => {
+        mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+        mockVideoRepo.findOne.mockResolvedValue({
+          id: 'vid-1',
+          channel_id: 'chan-1',
+          status: VideoStatus.DRAFT,
+          upload_id: 'up-1',
+          storage_key: 'videos/chan-1/vid-1/original.mp4',
+        });
       });
 
-      await service.abortUpload('u1', 'vid-1');
+      it('should claim the draft, abort the multipart upload and delete the draft', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockVideoRepo.delete.mockResolvedValue({ affected: 1 });
 
-      expect(mockStorageService.abortMultipartUpload).toHaveBeenCalledWith(
-        'videos/chan-1/vid-1/original.mp4',
-        'up-1',
-      );
-      expect(mockVideoRepo.delete).toHaveBeenCalledWith({
-        id: 'vid-1',
-        status: VideoStatus.DRAFT,
+        await service.abortUpload('u1', 'vid-1');
+
+        expect(mockVideoRepo.update).toHaveBeenCalledWith(
+          { id: 'vid-1', status: VideoStatus.DRAFT, upload_id: 'up-1' },
+          { upload_id: null },
+        );
+        expect(mockStorageService.abortMultipartUpload).toHaveBeenCalledWith(
+          'videos/chan-1/vid-1/original.mp4',
+          'up-1',
+        );
+        expect(mockVideoRepo.delete).toHaveBeenCalledWith({
+          id: 'vid-1',
+          status: VideoStatus.DRAFT,
+          upload_id: IsNull(),
+        });
+      });
+
+      it('should throw VideoInvalidStateException without touching S3 when a complete claimed the draft first', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 0 });
+
+        await expect(service.abortUpload('u1', 'vid-1')).rejects.toBeInstanceOf(
+          VideoInvalidStateException,
+        );
+        expect(mockStorageService.abortMultipartUpload).not.toHaveBeenCalled();
+        expect(mockVideoRepo.delete).not.toHaveBeenCalled();
+      });
+
+      it('should give the upload back to the draft when the S3 abort fails', async () => {
+        mockVideoRepo.update.mockResolvedValue({ affected: 1 });
+        mockStorageService.abortMultipartUpload.mockRejectedValueOnce(
+          new Error('storage unavailable'),
+        );
+
+        await expect(service.abortUpload('u1', 'vid-1')).rejects.toThrow(
+          'storage unavailable',
+        );
+        expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
+          { id: 'vid-1', status: VideoStatus.DRAFT, upload_id: IsNull() },
+          { upload_id: 'up-1' },
+        );
+        expect(mockVideoRepo.delete).not.toHaveBeenCalled();
       });
     });
   });

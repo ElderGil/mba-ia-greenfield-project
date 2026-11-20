@@ -20,6 +20,7 @@ import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
+import { deferred, settled } from '../test/deferred';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from './entities/video.entity';
 import {
@@ -326,5 +327,115 @@ describe('VideosUploadService (integration)', () => {
 
     const gone = await videoRepo.findOneBy({ id: init.videoId });
     expect(gone).toBeNull();
+  });
+
+  describe('races and ambiguous storage outcomes', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('lets an abort that started first win over a concurrent complete, leaving no dead draft', async () => {
+      const { user } = await createOwner();
+      const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+      const abortAtStorage = deferred();
+      const releaseAbort = deferred();
+      const completeAtStorage = deferred();
+      const abortDone = deferred();
+      // Each spy pauses its call once, then restores and runs the real one.
+      const abortSpy = jest.spyOn(storageService, 'abortMultipartUpload');
+      abortSpy.mockImplementationOnce(async (key, uploadId) => {
+        abortAtStorage.resolve();
+        await releaseAbort.promise;
+        abortSpy.mockRestore();
+        return storageService.abortMultipartUpload(key, uploadId);
+      });
+      const completeSpy = jest.spyOn(storageService, 'completeMultipartUpload');
+      completeSpy.mockImplementationOnce(async (key, uploadId, parts) => {
+        completeAtStorage.resolve();
+        await abortDone.promise;
+        completeSpy.mockRestore();
+        return storageService.completeMultipartUpload(key, uploadId, parts);
+      });
+
+      // The abort reaches storage first; the complete runs while it waits.
+      const abort = uploadService.abortUpload(user.id, videoId);
+      void settled(abort).then(abortDone.resolve);
+      await abortAtStorage.promise;
+      const complete = uploadService.completeUpload(user.id, videoId, [
+        { partNumber: 1, etag },
+      ]);
+      await Promise.race([completeAtStorage.promise, settled(complete)]);
+      releaseAbort.resolve();
+      const [abortResult, completeResult] = await Promise.allSettled([
+        abort,
+        complete,
+      ]);
+
+      expect(abortResult.status).toBe('fulfilled');
+      expect(completeResult.status).toBe('rejected');
+      expect((completeResult as PromiseRejectedResult).reason).toBeInstanceOf(
+        VideoInvalidStateException,
+      );
+      expect(await videoRepo.findOneBy({ id: videoId })).toBeNull();
+    });
+
+    it('finishes the upload when an earlier complete closed it but its response was lost', async () => {
+      const { user } = await createOwner();
+      const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+      const parts = [{ partNumber: 1, etag }];
+      // Storage completes the upload, then the response is lost.
+      const completeSpy = jest.spyOn(storageService, 'completeMultipartUpload');
+      completeSpy.mockImplementationOnce(async (key, uploadId, p) => {
+        completeSpy.mockRestore();
+        await storageService.completeMultipartUpload(key, uploadId, p);
+        throw new Error('socket hang up');
+      });
+
+      await expect(
+        uploadService.completeUpload(user.id, videoId, parts),
+      ).rejects.toThrow('socket hang up');
+      // Unknown outcome: the draft stays retryable.
+      expect((await videoRepo.findOneByOrFail({ id: videoId })).status).toBe(
+        VideoStatus.DRAFT,
+      );
+
+      const retried = await uploadService.completeUpload(
+        user.id,
+        videoId,
+        parts,
+      );
+
+      expect(retried.status).toBe(VideoStatus.PROCESSING);
+      const row = await videoRepo.findOneByOrFail({ id: videoId });
+      expect(row.status).toBe(VideoStatus.PROCESSING);
+      expect(row.upload_id).toBeNull();
+      expect(await queue.getJob(retried.jobId)).toBeDefined();
+    });
+
+    it('marks the video failed when the multipart upload is gone and no object was stored', async () => {
+      const { user } = await createOwner();
+      const { videoId, etag } = await initiateAndUploadOnePart(user.id);
+      const draft = await videoRepo.findOneByOrFail({ id: videoId });
+      // Expired or aborted outside the API (e.g. a bucket lifecycle rule).
+      await realAbortOf(draft);
+
+      await expect(
+        uploadService.completeUpload(user.id, videoId, [
+          { partNumber: 1, etag },
+        ]),
+      ).rejects.toBeInstanceOf(VideoInvalidStateException);
+
+      const row = await videoRepo.findOneByOrFail({ id: videoId });
+      expect(row.status).toBe(VideoStatus.FAILED);
+      expect(row.upload_id).toBeNull();
+      expect(row.processing_error).toMatch(/no longer exists/i);
+    });
+
+    async function realAbortOf(video: Video): Promise<void> {
+      await storageService.abortMultipartUpload(
+        video.storage_key!,
+        video.upload_id!,
+      );
+    }
   });
 });

@@ -181,7 +181,7 @@ Module `src/videos/` (+ `src/storage/`, worker in `src/worker.module.ts`). Decis
 | `POST /videos/:id/uploads/parts` | owner, draft | Presigned `PUT` URL for one part (the client uploads straight to storage) |
 | `GET /videos/:id/uploads/parts` | owner, draft | Parts already stored, with ETags, to resume an upload |
 | `POST /videos/:id/uploads/complete` | owner, draft | `202`: claims draft → processing (conditional UPDATE, loser gets `409`), completes S3, checks size, enqueues the job |
-| `POST /videos/:id/uploads/abort` | owner, draft | `204`: aborts the multipart upload and deletes the draft |
+| `POST /videos/:id/uploads/abort` | owner, draft | `204`: claims the draft, aborts the multipart upload and deletes the draft; `409` if a complete claimed it first |
 | `GET /videos/me` | JWT | Videos of the caller's channel, any status |
 | `GET /videos/:id/status` | owner | Status, extracted metadata, `processingError`, `thumbnailUrl` |
 | `GET /videos/:shortCode` | public | Metadata + stream/download/thumbnail URLs |
@@ -194,6 +194,7 @@ Public routes answer `404 VIDEO_NOT_FOUND` for anything not `ready`, so a shortC
 ### Lifecycle and processing
 
 - Status: `draft` → `processing` → `ready` | `failed` (`VideoStatus`, Postgres enum). A rejected part list returns the row to `draft`; after S3 closes the multipart upload, any failure (HeadObject, oversize, enqueue) ends in `failed` with `processing_error`.
+- One claim rule for leaving a draft (`video-upload-session.ts`): complete, abort and the sweep all claim the row with a conditional UPDATE on `(id, draft, upload_id)` (`draftUploadClaim`) before any destructive S3 call, so exactly one of them owns the upload. A discard detaches `upload_id`, aborts, then deletes; if the abort fails the `upload_id` is put back. A complete that gets `NoSuchUpload` checks the object: present (an earlier complete whose response was lost) → it continues; absent (expired/aborted) → `failed`, `409`.
 - Queue: BullMQ `video-processing`, job `process-video`, id `process-video-{videoId}` (`processVideoJobId`), 3 attempts, exponential backoff. An `UnrecoverableError` (e.g. a stalled job) is final even with attempts left.
 - Worker: ffprobe/ffmpeg read the original through a presigned GET; the demuxer is forced from the stored MIME (`mov` for mp4/quicktime, `matroska` for webm/mkv) with a protocol whitelist, so images and disguised playlists are rejected and no URL inside the file is fetched. Tool errors are stored as `"<tool> failed: <stderr>"` with every URL redacted.
 - Maintenance sweep (BullMQ scheduler `video-maintenance-sweep`, every 15 min): aborts and deletes drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) and fails `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job.

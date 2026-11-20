@@ -12,6 +12,7 @@ import {
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
 } from './videos-queue.constants';
+import { discardDraftUpload } from './video-upload-session';
 
 export interface SweepResult {
   abortedDrafts: number;
@@ -77,15 +78,16 @@ export class VideoMaintenanceService {
     let removed = 0;
     for (const draft of drafts) {
       try {
-        if (draft.storage_key && draft.upload_id) {
-          await this.abortUpload(draft.storage_key, draft.upload_id);
+        // Same claim as complete: a draft completed meanwhile is skipped.
+        if (
+          await discardDraftUpload(
+            this.videoRepository,
+            this.storageService,
+            draft,
+          )
+        ) {
+          removed++;
         }
-        // Conditional: a draft completed meanwhile is no longer a draft.
-        const res = await this.videoRepository.delete({
-          id: draft.id,
-          status: VideoStatus.DRAFT,
-        });
-        if (res.affected === 1) removed++;
       } catch (err) {
         // Background task: keep the row so the next sweep retries it.
         this.logger.warn(
@@ -94,16 +96,6 @@ export class VideoMaintenanceService {
       }
     }
     return removed;
-  }
-
-  private async abortUpload(key: string, uploadId: string): Promise<void> {
-    try {
-      await this.storageService.abortMultipartUpload(key, uploadId);
-    } catch (err) {
-      // Already aborted (by a lifecycle rule or a previous sweep): done.
-      if ((err as { name?: string }).name === 'NoSuchUpload') return;
-      throw err;
-    }
   }
 
   private async failOrphanedProcessing(now: Date): Promise<number> {

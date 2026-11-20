@@ -16,7 +16,9 @@ import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
+import { deferred, settled } from '../test/deferred';
 import { User } from '../users/entities/user.entity';
+import { VideoInvalidStateException } from '../common/exceptions/domain.exception';
 import { Video, VideoStatus } from './entities/video.entity';
 import { VideoMaintenanceService } from './video-maintenance.service';
 import {
@@ -226,7 +228,61 @@ describe('VideoMaintenanceService (integration)', () => {
       expect(result.abortedDrafts).toBe(1);
       expect(await videoRepo.findOneBy({ id: stale.videoId })).toBeNull();
       // Kept for the next sweep instead of losing track of the upload.
-      expect(await videoRepo.findOneBy({ id: broken.videoId })).not.toBeNull();
+      const kept = await videoRepo.findOneByOrFail({ id: broken.videoId });
+      expect(kept.status).toBe(VideoStatus.DRAFT);
+      expect(kept.upload_id).toBe(broken.uploadId);
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('lets a stale-draft sweep that started first win over a concurrent complete', async () => {
+    const userId = await createOwnerId();
+    const stale = await initiate(userId);
+    await age(stale.videoId, 'created_at', '25 hours');
+    const sweepAtStorage = deferred();
+    const releaseSweep = deferred();
+    const completeAtStorage = deferred();
+    const sweepDone = deferred();
+    // Each spy pauses its call once, then restores and runs the real one.
+    const abortSpy = jest.spyOn(storageService, 'abortMultipartUpload');
+    abortSpy.mockImplementationOnce(async (key, uploadId) => {
+      sweepAtStorage.resolve();
+      await releaseSweep.promise;
+      abortSpy.mockRestore();
+      return storageService.abortMultipartUpload(key, uploadId);
+    });
+    const completeSpy = jest.spyOn(storageService, 'completeMultipartUpload');
+    completeSpy.mockImplementationOnce(async (key, uploadId, parts) => {
+      completeAtStorage.resolve();
+      await sweepDone.promise;
+      completeSpy.mockRestore();
+      return storageService.completeMultipartUpload(key, uploadId, parts);
+    });
+
+    try {
+      const sweep = maintenance.sweep(new Date());
+      void settled(sweep).then(sweepDone.resolve);
+      await sweepAtStorage.promise;
+      const complete = uploadService.completeUpload(userId, stale.videoId, [
+        { partNumber: 1, etag: '"etag"' },
+      ]);
+      await Promise.race([completeAtStorage.promise, settled(complete)]);
+      releaseSweep.resolve();
+      const [sweepResult, completeResult] = await Promise.allSettled([
+        sweep,
+        complete,
+      ]);
+
+      expect(sweepResult).toEqual({
+        status: 'fulfilled',
+        value: { abortedDrafts: 1, failedOrphans: 0 },
+      });
+      expect(completeResult.status).toBe('rejected');
+      expect((completeResult as PromiseRejectedResult).reason).toBeInstanceOf(
+        VideoInvalidStateException,
+      );
+      expect(await videoRepo.findOneBy({ id: stale.videoId })).toBeNull();
     } finally {
       jest.restoreAllMocks();
     }
