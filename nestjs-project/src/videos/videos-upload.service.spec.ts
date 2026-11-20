@@ -350,7 +350,7 @@ describe('VideosUploadService', () => {
         );
       });
 
-      it('should mark the video failed before deleting an oversized object, even if the delete fails', async () => {
+      it('should answer 413 and mark the video failed even if deleting the oversized object fails', async () => {
         mockVideoRepo.update.mockResolvedValue({ affected: 1 });
         mockStorageService.completeMultipartUpload.mockResolvedValue(undefined);
         mockStorageService.headObject.mockResolvedValue({
@@ -360,9 +360,11 @@ describe('VideosUploadService', () => {
         const deleteFailed = new Error('delete timed out');
         mockStorageService.deleteObject.mockRejectedValue(deleteFailed);
 
+        // The client's error is the size; the orphaned object is only logged.
         await expect(
           service.completeUpload('u1', 'vid-1', parts),
-        ).rejects.toThrow(deleteFailed);
+        ).rejects.toBeInstanceOf(UploadLimitExceededException);
+        expect(mockStorageService.deleteObject).toHaveBeenCalled();
         expect(mockVideoRepo.update).toHaveBeenLastCalledWith(
           { id: 'vid-1', status: VideoStatus.PROCESSING },
           {

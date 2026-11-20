@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
@@ -102,6 +102,8 @@ export interface CompleteUploadResult {
 
 @Injectable()
 export class VideosUploadService {
+  private readonly logger = new Logger(VideosUploadService.name);
+
   constructor(
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
@@ -286,7 +288,14 @@ export class VideosUploadService {
         upload_id: null,
         processing_error: 'Uploaded object exceeded maximum allowed size',
       });
-      await this.storageService.deleteObject(video.storage_key!);
+      try {
+        await this.storageService.deleteObject(video.storage_key!);
+      } catch (err) {
+        // The client's error is the size; an orphaned object is only ops work.
+        this.logger.warn(
+          `Could not delete oversized object ${video.storage_key}: ${(err as Error).message}`,
+        );
+      }
       throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
     }
 
