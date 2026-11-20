@@ -530,6 +530,19 @@ describe('Videos (e2e)', () => {
       .expect(400);
     expect((badBody.body as ErrorBody).error).toBe('VALIDATION_ERROR');
 
+    // Whitespace-only title or filename is as empty as ''
+    for (const blank of [
+      { title: '   ', filename: 'a.mp4' },
+      { title: 'Ok', filename: ' \t ' },
+    ]) {
+      const res = await request(app.getHttpServer())
+        .post('/videos/uploads/initiate')
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .send({ ...blank, mimeType: 'video/mp4', sizeBytes: 1024 })
+        .expect(400);
+      expect((res.body as ErrorBody).error).toBe('VALIDATION_ERROR');
+    }
+
     // > 10 GiB -> 413 UPLOAD_LIMIT_EXCEEDED
     const tooLarge = await request(app.getHttpServer())
       .post('/videos/uploads/initiate')
