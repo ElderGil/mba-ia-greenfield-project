@@ -14,7 +14,9 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from '../src/app.module';
+import { JSON_BODY_LIMIT } from '../src/common/common.constants';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { MailService } from '../src/mail/mail.service';
@@ -77,7 +79,11 @@ describe('Videos (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    const expressApp =
+      moduleFixture.createNestApplication<NestExpressApplication>();
+    // Mirrors main.ts
+    expressApp.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+    app = expressApp;
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -198,7 +204,8 @@ describe('Videos (e2e)', () => {
     expect(shortCode).toMatch(/^[A-Za-z0-9_-]{11}$/);
     expect(initBody.status).toBe(VideoStatus.DRAFT);
 
-    // Draft appears in /videos/me, but public playback returns 409 VIDEO_NOT_READY
+    // Draft appears in /videos/me; public routes answer 404 so a shortCode
+    // does not reveal that an unpublished video exists
     const myVideos = await request(app.getHttpServer())
       .get('/videos/me')
       .set('Authorization', `Bearer ${accessToken}`)
@@ -207,7 +214,12 @@ describe('Videos (e2e)', () => {
     expect(myVideosList).toHaveLength(1);
     expect(myVideosList[0].status).toBe(VideoStatus.DRAFT);
 
-    await request(app.getHttpServer()).get(`/videos/${shortCode}`).expect(409);
+    for (const suffix of ['', '/stream', '/download', '/thumbnail']) {
+      const hidden = await request(app.getHttpServer())
+        .get(`/videos/${shortCode}${suffix}`)
+        .expect(404);
+      expect((hidden.body as ErrorBody).error).toBe('VIDEO_NOT_FOUND');
+    }
 
     // 2. Request presigned part URL and PUT bytes directly to MinIO
     const partRes = await request(app.getHttpServer())
@@ -250,8 +262,11 @@ describe('Videos (e2e)', () => {
     expect(settled.width).toBe(320);
     expect(settled.height).toBe(240);
     expect(settled.codec).toBe('h264');
-    expect(settled.thumbnailKey).toBeTruthy();
-    createdStorageKeys.push(settled.thumbnailKey!);
+    expect(settled.thumbnailUrl).toBe(`/videos/${shortCode}/thumbnail`);
+    expect(settled).not.toHaveProperty('thumbnailKey');
+    createdStorageKeys.push(
+      (await videoRepo.findOneByOrFail({ id: videoId })).thumbnail_key!,
+    );
 
     // 5. Public metadata (@Public)
     const publicMeta = await request(app.getHttpServer())
@@ -277,6 +292,15 @@ describe('Videos (e2e)', () => {
     const thumbBuf = thumbRes.body as Buffer;
     expect(thumbBuf[0]).toBe(0xff);
     expect(thumbBuf[1]).toBe(0xd8);
+
+    // Revalidation: same ETag answers 304 without a body
+    const thumbEtag: string = thumbRes.headers['etag'];
+    expect(thumbEtag).toMatch(/^"[^"]+"$/);
+    expect(thumbRes.headers['cache-control']).toBe('no-cache');
+    await request(app.getHttpServer())
+      .get(`/videos/${shortCode}/thumbnail`)
+      .set('If-None-Match', thumbEtag)
+      .expect(304);
 
     // 7. Byte-Range streaming (206 Partial Content) without full download
     const streamRes1 = await request(app.getHttpServer())
@@ -319,6 +343,9 @@ describe('Videos (e2e)', () => {
       .set('Range', `bytes=${sampleMp4.length + 100}-`)
       .expect(416);
     expect((invalidRange.body as ErrorBody).error).toBe('INVALID_RANGE');
+    expect(invalidRange.headers['content-range']).toBe(
+      `bytes */${sampleMp4.length}`,
+    );
 
     // 8. Full attachment download (@Public)
     const downloadRes = await request(app.getHttpServer())
@@ -332,9 +359,222 @@ describe('Videos (e2e)', () => {
       .expect(200);
 
     expect(downloadRes.headers['content-disposition']).toBe(
-      'attachment; filename="sample.mp4"',
+      `attachment; filename="sample.mp4"; filename*=UTF-8''sample.mp4`,
     );
     expect(Buffer.compare(downloadRes.body as Buffer, sampleMp4)).toBe(0);
+  }, 30000);
+
+  async function uploadReadyVideo(
+    accessToken: string,
+    filename: string,
+  ): Promise<{ shortCode: string }> {
+    const initRes = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Regression video',
+        filename,
+        mimeType: 'video/mp4',
+        sizeBytes: sampleMp4.length,
+      })
+      .expect(201);
+    const { videoId, shortCode, storageKey } =
+      initRes.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+
+    const partRes = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ partNumber: 1 })
+      .expect(200);
+    const putRes = await fetch(
+      (partRes.body as SignUploadPartResponseDto).presignedUrl,
+      { method: 'PUT', body: new Uint8Array(sampleMp4) },
+    );
+    await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [{ partNumber: 1, etag: putRes.headers.get('etag') }] })
+      .expect(202);
+
+    const settled = await pollVideoUntilSettled(accessToken, videoId);
+    expect(settled.status).toBe(VideoStatus.READY);
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    if (row.thumbnail_key) createdStorageKeys.push(row.thumbnail_key);
+    return { shortCode };
+  }
+
+  it('downloads files whose name is outside Latin-1 and answers HEAD without reading storage', async () => {
+    const { accessToken } = await registerConfirmAndLogin('filename');
+    const { shortCode } = await uploadReadyVideo(
+      accessToken,
+      'Aula 01 – Introdução.mp4',
+    );
+
+    const downloadRes = await request(app.getHttpServer())
+      .get(`/videos/${shortCode}/download`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(downloadRes.headers['content-disposition']).toBe(
+      `attachment; filename="Aula 01 _ Introducao.mp4"; filename*=UTF-8''Aula%2001%20%E2%80%93%20Introdu%C3%A7%C3%A3o.mp4`,
+    );
+    expect(Buffer.compare(downloadRes.body as Buffer, sampleMp4)).toBe(0);
+
+    const getObject = jest.spyOn(storageService, 'getObjectStream');
+    try {
+      for (const route of ['stream', 'download']) {
+        const headRes = await request(app.getHttpServer())
+          .head(`/videos/${shortCode}/${route}`)
+          .expect(200);
+        expect(headRes.headers['content-length']).toBe(
+          String(sampleMp4.length),
+        );
+      }
+      const rangedHead = await request(app.getHttpServer())
+        .head(`/videos/${shortCode}/stream`)
+        .set('Range', 'bytes=0-99')
+        .expect(206);
+      expect(rangedHead.headers['content-range']).toBe(
+        `bytes 0-99/${sampleMp4.length}`,
+      );
+      expect(getObject).not.toHaveBeenCalled();
+    } finally {
+      getObject.mockRestore();
+    }
+  }, 30000);
+
+  it('caps open drafts per channel and rate-limits upload initiation', async () => {
+    const { accessToken } = await registerConfirmAndLogin('limits');
+    const initiate = (mimeType = 'video/mp4') =>
+      request(app.getHttpServer())
+        .post('/videos/uploads/initiate')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ title: 'Draft', filename: 'a.mp4', mimeType, sizeBytes: 1024 });
+
+    for (let i = 0; i < 5; i++) {
+      const res = await initiate().expect(201);
+      createdStorageKeys.push(
+        (res.body as InitiateUploadResponseDto).storageKey,
+      );
+    }
+    const capped = await initiate().expect(409);
+    expect((capped.body as ErrorBody).error).toBe('TOO_MANY_OPEN_UPLOADS');
+
+    // 6 requests so far; rejected ones count too. The 11th within a minute is throttled.
+    for (let i = 0; i < 4; i++) await initiate('application/pdf').expect(415);
+    await initiate('application/pdf').expect(429);
+
+    // Public media routes stay unthrottled (players issue many range requests).
+    for (let i = 0; i < 12; i++) {
+      await request(app.getHttpServer())
+        .get('/videos/nonexistent0/stream')
+        .expect(404);
+    }
+  });
+
+  it('accepts a complete request listing the maximum number of parts and rejects more', async () => {
+    const { accessToken } = await registerConfirmAndLogin('maxparts');
+    const init = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Big',
+        filename: 'big.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 1024,
+      })
+      .expect(201);
+    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+    const parts = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        partNumber: Math.min(i + 1, 10000),
+        etag: '"0123456789abcdef0123456789abcdef"',
+      }));
+
+    // ~550 kB body: must reach the service (storage rejects the fake ETags)
+    // instead of dying in the 100 kB default body parser with 413.
+    const max = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: parts(10000) })
+      .expect(400);
+    expect((max.body as ErrorBody).error).toBe('INVALID_UPLOAD_PARTS');
+
+    const tooMany = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: parts(10001) })
+      .expect(400);
+    expect((tooMany.body as ErrorBody).error).toBe('VALIDATION_ERROR');
+  }, 30000);
+
+  it('lets a client that lost its state resume: list uploaded parts, then complete', async () => {
+    const { accessToken } = await registerConfirmAndLogin('resume');
+    const other = await registerConfirmAndLogin('resume_other');
+    const init = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Resume',
+        filename: 'r.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: sampleMp4.length,
+      })
+      .expect(201);
+    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+    const signed = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ partNumber: 1 })
+      .expect(200);
+    await fetch((signed.body as SignUploadPartResponseDto).presignedUrl, {
+      method: 'PUT',
+      body: new Uint8Array(sampleMp4),
+    });
+
+    // The client forgot the ETag (page reload): ask the API.
+    const listed = await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const { parts } = listed.body as {
+      parts: { partNumber: number; etag: string; sizeBytes: number }[];
+    };
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      partNumber: 1,
+      sizeBytes: sampleMp4.length,
+    });
+
+    await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${other.accessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        parts: parts.map(({ partNumber, etag }) => ({ partNumber, etag })),
+      })
+      .expect(202);
+    const settled = await pollVideoUntilSettled(accessToken, videoId);
+    expect(settled.status).toBe(VideoStatus.READY);
+    const row = await videoRepo.findOneByOrFail({ id: videoId });
+    if (row.thumbnail_key) createdStorageKeys.push(row.thumbnail_key);
+
+    // Completed uploads have nothing left to list.
+    await request(app.getHttpServer())
+      .get(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(409);
   }, 30000);
 
   it('generates distinct unique shortCodes for multiple videos', async () => {
@@ -395,6 +635,19 @@ describe('Videos (e2e)', () => {
       })
       .expect(400);
     expect((badBody.body as ErrorBody).error).toBe('VALIDATION_ERROR');
+
+    // Whitespace-only title or filename is as empty as ''
+    for (const blank of [
+      { title: '   ', filename: 'a.mp4' },
+      { title: 'Ok', filename: ' \t ' },
+    ]) {
+      const res = await request(app.getHttpServer())
+        .post('/videos/uploads/initiate')
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .send({ ...blank, mimeType: 'video/mp4', sizeBytes: 1024 })
+        .expect(400);
+      expect((res.body as ErrorBody).error).toBe('VALIDATION_ERROR');
+    }
 
     // > 10 GiB -> 413 UPLOAD_LIMIT_EXCEEDED
     const tooLarge = await request(app.getHttpServer())
@@ -499,6 +752,7 @@ describe('Videos (e2e)', () => {
 
     const settled = await pollVideoUntilSettled(accessToken, videoId, 25000);
     expect(settled.status).toBe(VideoStatus.FAILED);
-    expect(settled.processingError).toBeTruthy();
+    expect(settled.processingError).toMatch(/^ffprobe failed: /);
+    expect(settled.processingError).not.toMatch(/X-Amz|minio:9000|https?:\/\//);
   }, 30000);
 });

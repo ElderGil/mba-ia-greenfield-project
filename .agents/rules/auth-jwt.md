@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/src/auth/**'
+trigger: glob
+globs: "nestjs-project/src/auth/**"
 description: 'JWT and refresh-token rotation rules'
 ---
 
@@ -66,4 +66,4 @@ This module is responsible for registering `JwtAuthGuard` as `APP_GUARD`. The de
 ## Rate Limiting
 
 - Rate limits on auth endpoints are enforced by the global `ThrottlerGuard`.
-- E2E tests for non-throttled endpoints must clear the throttler storage in `beforeEach` to avoid leaking 429s across describe blocks. See `.claude/rules/nestjs-testing.md` for the override pattern.
+- E2E tests for non-throttled endpoints must clear the throttler storage in `beforeEach` to avoid leaking 429s across describe blocks. See `.agents/rules/nestjs-testing.md` for the override pattern.

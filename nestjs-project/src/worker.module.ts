@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Channel } from './channels/entities/channel.entity';
 import databaseConfig from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
-import queueConfig from './config/queue.config';
+import queueConfig, { bullRootOptions } from './config/queue.config';
 import storageConfig from './config/storage.config';
 import videoConfig from './config/video.config';
 import { StorageModule } from './storage/storage.module';
@@ -13,7 +13,12 @@ import { User } from './users/entities/user.entity';
 import { Video } from './videos/entities/video.entity';
 import { MediaProcessorService } from './videos/media-processor.service';
 import { VideoProcessingProcessor } from './videos/video-processing.processor';
-import { VIDEO_PROCESSING_QUEUE } from './videos/videos-queue.constants';
+import { VideoMaintenanceProcessor } from './videos/video-maintenance.processor';
+import { VideoMaintenanceService } from './videos/video-maintenance.service';
+import {
+  VIDEO_MAINTENANCE_QUEUE,
+  VIDEO_PROCESSING_QUEUE,
+} from './videos/videos-queue.constants';
 
 @Module({
   imports: [
@@ -41,16 +46,20 @@ import { VIDEO_PROCESSING_QUEUE } from './videos/videos-queue.constants';
     BullModule.forRootAsync({
       inject: [queueConfig.KEY],
       useFactory: (qConfig: ConfigType<typeof queueConfig>) => ({
-        connection: {
-          host: qConfig.redisHost,
-          port: qConfig.redisPort,
-          password: qConfig.redisPassword,
-        },
+        ...bullRootOptions(qConfig),
       }),
     }),
-    BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
+    BullModule.registerQueue(
+      { name: VIDEO_PROCESSING_QUEUE },
+      { name: VIDEO_MAINTENANCE_QUEUE },
+    ),
     StorageModule,
   ],
-  providers: [MediaProcessorService, VideoProcessingProcessor],
+  providers: [
+    MediaProcessorService,
+    VideoProcessingProcessor,
+    VideoMaintenanceService,
+    VideoMaintenanceProcessor,
+  ],
 })
 export class WorkerModule {}

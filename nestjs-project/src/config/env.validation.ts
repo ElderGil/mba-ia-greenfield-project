@@ -19,7 +19,7 @@ export const envValidationSchema = Joi.object({
   APP_URL: Joi.string().uri().default('http://localhost:3000'),
   MAIL_HOST: Joi.string().default('mailpit'),
   MAIL_PORT: Joi.number().default(1025),
-  MAIL_FROM: Joi.string().default('"StreamTube <noreply@streamtube.com>"'),
+  MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
 
   // Object Storage (S3 / MinIO)
@@ -35,6 +35,7 @@ export const envValidationSchema = Joi.object({
   REDIS_HOST: Joi.string().default('redis'),
   REDIS_PORT: Joi.number().port().default(6379),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
+  QUEUE_PREFIX: Joi.string().default('bull'),
 
   // Video Upload & Processing
   VIDEO_MAX_SIZE_BYTES: Joi.number().integer().positive().default(10737418240),
@@ -43,6 +44,9 @@ export const envValidationSchema = Joi.object({
     .min(5242880)
     .max(104857600)
     .default(10485760),
+  VIDEO_MAX_OPEN_DRAFTS: Joi.number().integer().positive().default(5),
+  VIDEO_DRAFT_TTL_HOURS: Joi.number().integer().positive().default(24),
+  VIDEO_PROCESSING_STUCK_MINUTES: Joi.number().integer().positive().default(30),
   VIDEO_PRESIGNED_URL_EXPIRES_IN: Joi.number()
     .integer()
     .positive()

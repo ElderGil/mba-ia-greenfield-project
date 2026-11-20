@@ -3,6 +3,8 @@ export abstract class DomainException extends Error {
     public readonly errorCode: string,
     public readonly httpStatus: number,
     message: string,
+    // Extra response headers the HTTP layer must send with the error.
+    public readonly headers?: Readonly<Record<string, string>>,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -77,9 +79,13 @@ export class VideoInvalidStateException extends DomainException {
   }
 }
 
-export class VideoNotReadyException extends DomainException {
-  constructor() {
-    super('VIDEO_NOT_READY', 409, 'Video is not ready for playback');
+export class TooManyOpenUploadsException extends DomainException {
+  constructor(limit: number) {
+    super(
+      'TOO_MANY_OPEN_UPLOADS',
+      409,
+      `Channel already has ${limit} uploads in progress; complete or abort one first`,
+    );
   }
 }
 
@@ -110,7 +116,18 @@ export class InvalidUploadPartsException extends DomainException {
 }
 
 export class InvalidRangeException extends DomainException {
-  constructor(message = 'Requested byte range is invalid or unsatisfiable') {
-    super('INVALID_RANGE', 416, message);
+  constructor(
+    totalSize?: number,
+    message = 'Requested byte range is invalid or unsatisfiable',
+  ) {
+    // RFC 9110 §15.5.17: a 416 carries the current length of the resource.
+    super(
+      'INVALID_RANGE',
+      416,
+      message,
+      totalSize !== undefined
+        ? { 'Content-Range': `bytes */${totalSize}` }
+        : undefined,
+    );
   }
 }

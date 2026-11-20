@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/src/**/*.ts'
+trigger: glob
+globs: "nestjs-project/src/**/*.ts"
 description: 'NestJS common conventions'
 ---
 

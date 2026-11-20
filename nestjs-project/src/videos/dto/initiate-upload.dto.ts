@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsInt,
   IsNotEmpty,
@@ -8,8 +9,14 @@ import {
   MinLength,
 } from 'class-validator';
 
+// "   " must fail @IsNotEmpty like "" does; the trimmed value is stored.
+function trimString({ value }: { value: unknown }): unknown {
+  return typeof value === 'string' ? value.trim() : value;
+}
+
 export class InitiateUploadDto {
   @ApiProperty({ example: 'My Awesome Video', maxLength: 255 })
+  @Transform(trimString)
   @IsString()
   @IsNotEmpty()
   @MinLength(1)
@@ -17,6 +24,7 @@ export class InitiateUploadDto {
   title: string;
 
   @ApiProperty({ example: 'recording.mp4', maxLength: 255 })
+  @Transform(trimString)
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)

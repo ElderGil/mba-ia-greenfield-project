@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/*.dto.ts'
+trigger: glob
+globs: "nestjs-project/**/*.dto.ts"
 description: 'DTO conventions for input validation and data transfer'
 ---
 

@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/*.controller.ts'
+trigger: glob
+globs: "nestjs-project/**/*.controller.ts"
 description: 'Controller conventions — REST compliance, no silent errors, prefer exception filters over try/catch'
 ---
 

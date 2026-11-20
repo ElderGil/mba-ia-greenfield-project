@@ -6,6 +6,7 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   InvalidUploadPartsException,
+  TooManyOpenUploadsException,
   UnsupportedMediaTypeException,
   UploadLimitExceededException,
   VideoAccessDeniedException,
@@ -17,6 +18,7 @@ import {
   type CompletedPartInput,
   S3StorageService,
   type StorageObjectMetadata,
+  type UploadedPart,
 } from '../storage/s3-storage.service';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -118,6 +120,15 @@ export class VideosUploadService {
       throw new ChannelNotFoundException();
     }
 
+    // Soft cap: two concurrent initiates may both pass the count, so the
+    // bound is maxOpenDrafts + concurrency, which is enough against abuse.
+    const openDrafts = await this.videoRepository.count({
+      where: { channel_id: channel.id, status: VideoStatus.DRAFT },
+    });
+    if (openDrafts >= this.config.maxOpenDrafts) {
+      throw new TooManyOpenUploadsException(this.config.maxOpenDrafts);
+    }
+
     const video = await this.createDraftVideoWithUniqueShortCode(
       channel.id,
       dto,
@@ -168,6 +179,18 @@ export class VideosUploadService {
       presignedUrl,
       expiresInSeconds: this.config.presignedUrlExpiresInSeconds,
     };
+  }
+
+  // Lets a client that lost its ETags (reload, crash) resume the upload.
+  async listUploadedParts(
+    userId: string,
+    videoId: string,
+  ): Promise<UploadedPart[]> {
+    const video = await this.requireOwnedDraftVideo(userId, videoId);
+    return this.storageService.listUploadedParts(
+      video.storage_key!,
+      video.upload_id!,
+    );
   }
 
   async completeUpload(

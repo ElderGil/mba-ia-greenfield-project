@@ -7,7 +7,6 @@ import {
   InvalidRangeException,
   VideoAccessDeniedException,
   VideoNotFoundException,
-  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -69,6 +68,29 @@ describe('VideosService', () => {
       });
     });
 
+    it('treats a suffix longer than the file as the whole file, even beyond 2^53', () => {
+      expect(service.parseByteRange('bytes=-6000', 5000)).toEqual({
+        start: 0,
+        end: 4999,
+      });
+      expect(
+        service.parseByteRange('bytes=-99999999999999999999', 5000),
+      ).toEqual({ start: 0, end: 4999 });
+    });
+
+    it('carries Content-Range: bytes */size on an unsatisfiable range (RFC 9110)', () => {
+      let thrown: unknown;
+      try {
+        service.parseByteRange('bytes=6000-', 5000);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(InvalidRangeException);
+      expect((thrown as InvalidRangeException).headers).toEqual({
+        'Content-Range': 'bytes */5000',
+      });
+    });
+
     it.each([
       ['items=0-10', 5000],
       ['bytes=0-10,20-30', 5000],
@@ -111,7 +133,7 @@ describe('VideosService', () => {
       );
     });
 
-    it('throws VideoNotReadyException when video is still processing', async () => {
+    it('hides a video that is not ready behind VideoNotFoundException', async () => {
       mockVideoRepo.findOne.mockResolvedValue({
         id: 'v1',
         short_code: 'abc12345678',
@@ -121,7 +143,7 @@ describe('VideosService', () => {
 
       await expect(
         service.getReadyVideoByShortCode('abc12345678'),
-      ).rejects.toThrow(VideoNotReadyException);
+      ).rejects.toThrow(VideoNotFoundException);
     });
   });
 
@@ -143,6 +165,8 @@ describe('VideosService', () => {
       });
 
       const res = await service.getVideoStream('abc12345678', 'bytes=0-9');
+      expect(mockStorageService.getObjectStream).not.toHaveBeenCalled();
+      await res.open();
 
       expect(mockStorageService.getObjectStream).toHaveBeenCalledWith(
         'videos/c1/v1/original.mp4',
@@ -153,25 +177,23 @@ describe('VideosService', () => {
       expect(res.contentRange).toBe('bytes 0-9/1000');
     });
 
-    it('sanitizes download filename in getVideoDownload', async () => {
+    it('returns the stored filename and size without opening storage in getVideoDownload', async () => {
       mockVideoRepo.findOne.mockResolvedValue({
         id: 'v1',
         short_code: 'abc12345678',
         status: VideoStatus.READY,
         storage_key: 'videos/c1/v1/original.mp4',
-        original_filename: '../evil"clip\n.mp4',
+        original_filename: 'Aula 01 – Introdução.mp4',
         mime_type: 'video/mp4',
         size_bytes: '100',
       });
-      mockStorageService.getObjectStream.mockResolvedValue({
-        stream: Readable.from(Buffer.from('abc')),
-        contentLength: 100,
-        contentRange: undefined,
-        contentType: 'video/mp4',
-      });
 
       const res = await service.getVideoDownload('abc12345678');
-      expect(res.filename).toBe('evilclip.mp4');
+
+      // Header encoding is the HTTP layer's job (buildContentDisposition).
+      expect(res.filename).toBe('Aula 01 – Introdução.mp4');
+      expect(res.contentLength).toBe(100);
+      expect(mockStorageService.getObjectStream).not.toHaveBeenCalled();
     });
   });
 });

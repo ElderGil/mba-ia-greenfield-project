@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/*.entity.ts'
+trigger: glob
+globs: "nestjs-project/**/*.entity.ts"
 description: 'TypeORM entity conventions for database models'
 ---
 

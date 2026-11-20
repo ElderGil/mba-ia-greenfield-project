@@ -495,6 +495,16 @@
               }
             }
           },
+          "409": {
+            "description": "Channel already has the maximum number of open uploads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "413": {
             "description": "Video size exceeds 10 GiB limit",
             "content": {
@@ -514,6 +524,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too many upload initiations; retry later"
           }
         },
         "security": [
@@ -620,6 +633,82 @@
           }
         ],
         "summary": "Get presigned URL for a multipart upload part",
+        "tags": [
+          "videos"
+        ]
+      },
+      "get": {
+        "description": "Lets a client that lost its state (reload, crash) resume a multipart upload: returns the stored parts with their ETags, ready for /uploads/complete.",
+        "operationId": "VideosController_listUploadedParts",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Uploaded parts, ascending by partNumber",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUploadedPartsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — video belongs to another channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is no longer a draft with an open upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List the parts already uploaded for a draft",
         "tags": [
           "videos"
         ]
@@ -939,17 +1028,7 @@
             }
           },
           "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Video is not ready for playback",
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -995,18 +1074,11 @@
           "206": {
             "description": "Partial video byte stream"
           },
-          "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
           },
-          "409": {
-            "description": "Video is not ready for playback",
+          "404": {
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1050,18 +1122,11 @@
           "200": {
             "description": "Video file download stream"
           },
-          "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
           },
-          "409": {
-            "description": "Video is not ready for download",
+          "404": {
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1095,18 +1160,11 @@
           "200": {
             "description": "JPEG thumbnail image"
           },
-          "404": {
-            "description": "Video not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
+          "304": {
+            "description": "Not modified (If-None-Match matched the ETag)"
           },
-          "409": {
-            "description": "Video is not ready",
+          "404": {
+            "description": "Video not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -1281,6 +1339,42 @@
           "expiresInSeconds"
         ]
       },
+      "UploadedPartResponseDto": {
+        "type": "object",
+        "properties": {
+          "partNumber": {
+            "type": "number",
+            "example": 1
+          },
+          "etag": {
+            "type": "string",
+            "example": "\"d41d8cd98f00b204e9800998ecf8427e\""
+          },
+          "sizeBytes": {
+            "type": "number",
+            "example": 10485760
+          }
+        },
+        "required": [
+          "partNumber",
+          "etag",
+          "sizeBytes"
+        ]
+      },
+      "ListUploadedPartsResponseDto": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadedPartResponseDto"
+            }
+          }
+        },
+        "required": [
+          "parts"
+        ]
+      },
       "UploadPartEtagDto": {
         "type": "object",
         "properties": {
@@ -1398,9 +1492,10 @@
             "type": "object",
             "nullable": true
           },
-          "thumbnailKey": {
+          "thumbnailUrl": {
             "type": "object",
-            "nullable": true
+            "nullable": true,
+            "description": "Public thumbnail URL once the video is ready"
           },
           "processingError": {
             "type": "object",

@@ -193,7 +193,7 @@ Never guess, never auto-recover, never partially proceed. The pipeline is determ
 
 ## Shared convention — Subagent delegation
 
-Heavy reads (project-plan, globbing all decisions docs, scanning prior phases) are delegated to subagents in `.claude/agents/`:
+Heavy reads (project-plan, globbing all decisions docs, scanning prior phases) are delegated to subagents in `.agents/agents/`:
 
 - `decisions-reader` — globs and filters decisions docs; returns a structured TD index.
   - Phase mode: filter by `NN ∈ related_phases`.
@@ -346,7 +346,7 @@ Both follow the minimum frontmatter shape above.
 
 The format of the final planning artifact — `phase-NN-{slug}.md` or `task-{slug}.md` — (Step Implementations, Technical Specifications, Dependency Map, Deliverables) is established by `docs/phases/phase-01-base-setup/phase-01-base-setup.md`. `plan-build` replicates this format regardless of mode. Cross-phase conventions (Portuguese prose + English identifiers, per-TD traceability via inline backticked refs, SI template structure, etc.) propagate through `context.md`'s `## Inherited Conventions` section: `phases-reader` extracts them from prior phases (reading each phase's `context.md`, with a fallback to a `## Conventions to Match` section in the phase doc for legacy phases that still carry one), and `plan-context` flattens them into the current phase's (or task's) `## Inherited Conventions`. Final artifacts never emit a conventions section themselves — inheritance flows through `context.md`.
 
-When UI is in scope, the same format contract for the final artifact applies: `UI Contracts` and `UI ↔ API Traceability Matrix` subsections in Technical Specifications follow the templates under `.claude/skills/plan-build/templates/tech-specs/` (`ui-contracts.md`, `traceability-matrix.md`). Cross-phase UI conventions (component naming, reuse patterns, routing conventions) propagate through `context.md`'s `## Inherited Conventions` section like any other convention — `phases-reader` extracts them as-is.
+When UI is in scope, the same format contract for the final artifact applies: `UI Contracts` and `UI ↔ API Traceability Matrix` subsections in Technical Specifications follow the templates under `.agents/skills/plan-build/templates/tech-specs/` (`ui-contracts.md`, `traceability-matrix.md`). Cross-phase UI conventions (component naming, reuse patterns, routing conventions) propagate through `context.md`'s `## Inherited Conventions` section like any other convention — `phases-reader` extracts them as-is.
 
 ## What lives here vs. in stage skills
 

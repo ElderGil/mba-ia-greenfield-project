@@ -30,6 +30,11 @@ Distilled official API references for libraries decided in Phase 03 (`technical-
 
 > **Re-verification (2026-11-17, peer review):** the first version of this file cited only `npm view` + docs, because context7 was not configured in the Antigravity MCP config. The APIs below were re-checked through context7. Version gaps between the context7 index and the installed packages, flagged per `CLAUDE.md` → Library Documentation Lookup: `bullmq` (context7 v6.3.11, installed 6.7.6) and `@aws-sdk/*` (context7 v3.1153.0, installed 3.1170.0). The installed versions are the ones exercised by the unit, integration and e2e suites against real Redis and MinIO.
 
+> **Final review additions (2026-11-20):** APIs adopted after the peer review, each checked through context7 before use (same version gaps as above):
+> - `@aws-sdk/client-s3`: `S3Client({ requestChecksumCalculation: 'WHEN_REQUIRED' })` on the presign client (UploadPart does not require a checksum; with the default `WHEN_SUPPORTED` the SDK signs a CRC32 of the empty body into the URL). `ListPartsCommand` with `MaxParts` / `PartNumberMarker`, paged on `IsTruncated`: the documented `paginateListParts` loops forever against MinIO/silo, whose last page carries `NextPartNumberMarker: "0"`.
+> - `bullmq`: `queue.upsertJobScheduler(id, { every }, { name })` for the maintenance sweep (idempotent across worker starts, one run per tick across replicas); `UnrecoverableError` is the error BullMQ uses to fail a job for good (stalled past `maxStalledCount`), so `onFailed` treats it as final; `job.getState()` to tell a live job from a lost one.
+> - `@nestjs/platform-express` (Nest core, not a Phase 03 lib): `NestFactory.create<NestExpressApplication>()` + `app.useBodyParser('json', { limit })` to raise the 100 kB default (NestJS docs, `faq/raw-body`).
+
 ---
 
 ### @nestjs/bullmq

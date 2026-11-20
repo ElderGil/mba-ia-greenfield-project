@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Plan Pipeline — Stage 5: Test Specs
 
-This is **Stage 5** (optional, post-build) of the plan pipeline defined in `.claude/skills/plan-pipeline/SKILL.md`. Read that file first for the cross-stage convention (frontmatter format, registered values, stage interaction). Stage 1-4 produce/edit a phase or task plan; Stage 5 derives external **spec files** from screen-wiring / controller-wiring / cross-layer SIs of that plan.
+This is **Stage 5** (optional, post-build) of the plan pipeline defined in `.agents/skills/plan-pipeline/SKILL.md`. Read that file first for the cross-stage convention (frontmatter format, registered values, stage interaction). Stage 1-4 produce/edit a phase or task plan; Stage 5 derives external **spec files** from screen-wiring / controller-wiring / cross-layer SIs of that plan.
 
 The skill is **skippable**: legacy plans (frontmatter without `test_specs_aware: true`) are routed to an abort message instructing migration; modern plans without any SI carrying `**Test Specs:**` (e.g., backend-pure phases) fall through silently.
 
@@ -281,7 +281,7 @@ If warnings count > 0, ensure the report references the line numbers (or just th
 
 ## Spec format (universal)
 
-The spec file is **NOT** a planning artifact — it does not follow `kind:` / `name:` convention from `.claude/skills/plan-pipeline/SKILL.md`. Specs are test contracts, parallel to `library-refs.md` exemption.
+The spec file is **NOT** a planning artifact — it does not follow `kind:` / `name:` convention from `.agents/skills/plan-pipeline/SKILL.md`. Specs are test contracts, parallel to `library-refs.md` exemption.
 
 ```markdown
 ---
@@ -380,7 +380,7 @@ The presence of `**Test Specs:**` field is the **trigger** (decides whether /pla
 
 ## Integration points
 
-- **plan-pipeline overview** — `/plan-test-specs` é Stage 5 (linked back from `.claude/skills/plan-pipeline/SKILL.md`).
+- **plan-pipeline overview** — `/plan-test-specs` é Stage 5 (linked back from `.agents/skills/plan-pipeline/SKILL.md`).
 - **plan-build** — emits `**Test Specs:** _pending /plan-test-specs_` placeholder em Xb / controller wiring / cross-layer SIs (phase-b.md, phase-c.md, screen-si.md) e `test_specs_aware: true` no frontmatter (phase-a.md). Output contract B7/C7 emite hint condicional pra invocar /plan-test-specs. **Trigger discriminator** (the placeholder string itself) is canonical — `/plan-test-specs` preflight greps for `^\*\*Test Specs:\*\* _pending` to count placeholders; `/implement` preflight uses the same regex.
 - **implement** — consome specs JIT no Step 3a (lê o spec, autora arquivo de teste via LLM single-pass; **1 spec → 1 file com N `test()` blocks**). Frontend: invoca `Skill playwright-cli` para carregar pattern references (test-generation.md, request-mocking.md, element-attributes.md) no contexto do LLM — NÃO invoca Section 2 interactive workflow nem `Bash playwright-cli generate` (subcomando inexistente). Backend: LLM-authored direto; o-que-testar e boas práticas por artefato vêm da Skill `testing-guide-{subproject}` (já carregada em `/implement` Step 2 para o subproject backend). Preflight modern aborta com `MISSING` / `STALE` / `PENDING TEST SPECS` (vide implement Skill § "Preflight").
 - **plan-validate** — **NO CHANGE.** Plan-validate continua operando só sobre `context.md`. Nenhum check spec-related; gates spec-related vivem em /plan-test-specs (delta report) e /implement preflight. Documentado em `docs/plan-spec-driven-test-skill.md` § "NO CHANGE".

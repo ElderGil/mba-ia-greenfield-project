@@ -36,7 +36,7 @@ Out of scope:
 You need a `fileKey` and optionally a `nodeId`. Look in this order:
 
 1. **Skill args.** If the user pasted a Figma URL, fileKey, or nodeId when invoking, parse it first. URL parsing: `figma.com/design/:fileKey/:name?node-id=1-2` → `fileKey` is `:fileKey`, `nodeId` is `1:2` (convert `-` to `:`). **Branch URLs:** `figma.com/design/:fileKey/branch/:branchKey/:name` → preserve BOTH: emit `fileKey` (the main file) AND `branchKey` (the branch) as distinct fields in the JSON. Use `branchKey` as the operative key for `use_figma` API calls (it routes to the branch), but record `fileKey` for provenance so a future re-audit can reproduce the same context.
-2. **Project rules and docs.** Grep `.claude/rules/*.md`, any per-app `CLAUDE.md`, and the project README for a `figma.com/design/...` URL or an explicit `fileKey:` entry.
+2. **Project rules and docs.** Grep `.agents/rules/*.md`, any per-app `CLAUDE.md`, and the project README for a `figma.com/design/...` URL or an explicit `fileKey:` entry.
 3. **Ask the user.** Only if the previous two turn up nothing.
 
 The `nodeId` matters less than the `fileKey` — variable collections live at the file level, so any node can anchor a first-pass scan. If nothing specific is known, the page root (`0:1`) works.

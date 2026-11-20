@@ -1,6 +1,6 @@
 # Plan Pipeline — Stage 4: Build → Phase A (Scaffold + Technical Specifications)
 
-This file is loaded by `.claude/skills/plan-build/SKILL.md` after Gate 10 dispatches a fresh build (or `--rebuild`). Read SKILL.md for preflight gates, dispatcher rules, hard rules, output contract, and rerun semantics — they apply to every phase.
+This file is loaded by `.agents/skills/plan-build/SKILL.md` after Gate 10 dispatches a fresh build (or `--rebuild`). Read SKILL.md for preflight gates, dispatcher rules, hard rules, output contract, and rerun semantics — they apply to every phase.
 
 Phase A writes the artifact scaffold + Technical Specifications subsections + four sentinelas, then pauses at A5 for the user to confirm continuation into Phase B.
 
@@ -128,7 +128,7 @@ Decide which spec subsections apply, then for each one in **canonical order (Dec
 4. `### Error Catalog` — when there are domain-specific error scenarios. The first HTTP-exposing phase in a subproject also defines the error response format (established at first appearance, then inherited by subsequent phases via `## Inherited Conventions` in context.md).
 5. `### Events/Messages` — when there are queues / async processing.
 6. `### UI Contracts` — emitted only when `ui_in_scope: true`. One `#### Screen: {name}` subsection per screen from `## UI Inventory → UI ↔ Capability Join`.
-7. `### Frontend Runtime` — emitted when ≥1 TD with `Renders in: frontend-runtime` (explicit OR default-by-inference) AND `ui_in_scope ∈ {true, logic-only}`. One `#### {td-slug}/TD-NN — {topic}` subsection per applicable TD, populated via the template at `.claude/skills/plan-build/templates/tech-specs/frontend-runtime.md`.
+7. `### Frontend Runtime` — emitted when ≥1 TD with `Renders in: frontend-runtime` (explicit OR default-by-inference) AND `ui_in_scope ∈ {true, logic-only}`. One `#### {td-slug}/TD-NN — {topic}` subsection per applicable TD, populated via the template at `.agents/skills/plan-build/templates/tech-specs/frontend-runtime.md`.
 8. `### UI ↔ API Traceability Matrix` — emitted only when `ui_in_scope: true`. Built from the in-memory join of API Contracts + UI Inventory Capability Join (see "Building the matrix" inside `templates/tech-specs/traceability-matrix.md`). Skipped when `ui_in_scope ∈ {false, deferred, logic-only}`.
 
 **Field-name verbatim invariant (F2 protection).** When rendering ANY subsection that cites field names, header names, error codes, endpoint paths, schema names, or library names from TDs, those identifiers MUST be copied byte-verbatim from the TD's Recommendation prose, `**Libraries:**` line, or `**Backend changes required:**` table cells. Do NOT:
@@ -151,7 +151,7 @@ This invariant is the prevention against transcription drift (renaming/casing ch
 
 For each applicable subsection:
 
-a. `Read` the corresponding template under `.claude/skills/plan-build/templates/tech-specs/{subsection}.md`. Templates exist for: `data-model.md`, `api-contracts.md`, `auth-matrix.md`, `error-catalog.md`, `events-messages.md`, `ui-contracts.md`, `traceability-matrix.md`.
+a. `Read` the corresponding template under `.agents/skills/plan-build/templates/tech-specs/{subsection}.md`. Templates exist for: `data-model.md`, `api-contracts.md`, `auth-matrix.md`, `error-catalog.md`, `events-messages.md`, `ui-contracts.md`, `traceability-matrix.md`.
 
 b. Draft the subsection content in memory, applying the TD Scope filter from A2 and the per-subsection field-derivation rules embedded in each template (notably `ui-contracts.md` carries the full 7-bucket classifier + most-restrictive-auth heuristic + opt-out marker registry).
 
@@ -200,7 +200,7 @@ This sentinel is the positive signal Gate 10 reads on rerun to confirm Phase A a
 
 After Tech Specs are written, dispatch `AskUserQuestion` with two options:
 
-- **Continue now (Phase B in this session)** — Read `.claude/skills/plan-build/phase-b.md` and proceed immediately to Phase B; the in-memory context.md from A1 carries over, no re-reads. Phase B's B1 step is a no-op in this same-session continuation path.
+- **Continue now (Phase B in this session)** — Read `.agents/skills/plan-build/phase-b.md` and proceed immediately to Phase B; the in-memory context.md from A1 carries over, no re-reads. Phase B's B1 step is a no-op in this same-session continuation path.
 - **Stop here (resume later)** — exit cleanly; emit the partial-artifact message defined in SKILL.md § "Output contract → Phase A pause".
 
 If the user chose "Continue now" → Read `phase-b.md` and fall through into Phase B in the same run.

@@ -28,7 +28,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 2. Create `src/config/storage.config.ts` (`registerAs('storage', ...)`), `src/config/queue.config.ts` (`registerAs('queue', ...)`), and `src/config/video.config.ts` (`registerAs('video', ...)` with `maxFileSizeBytes`, `defaultPartSizeBytes`, `presignedUrlExpiresInSeconds`) following `phase-01-configuracao-base/TD-03`.
 3. Extend `src/config/env.validation.ts` (`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `VIDEO_MAX_SIZE_BYTES`, `VIDEO_UPLOAD_PART_SIZE_BYTES`), update `nestjs-project/.env.example` and `nestjs-project/.env`, and register the new configs in `ConfigModule.forRoot` (`AppModule` and `WorkerModule`).
 4. Update `nestjs-project/Dockerfile.dev` to install `ffmpeg` (`apt install -y procps curl ffmpeg`) so both `video-worker` and integration tests inside `nestjs-api` have `ffmpeg` and `ffprobe` binaries (per `phase-03-videos/TD-05`).
-5. Update `nestjs-project/compose.yaml` to add `minio` (`minio/minio:latest`, ports `9000`/`9001`, healthcheck), `redis` (`redis:7-alpine`, port `6379`, AOF persistence, healthcheck), and `video-worker` (built from `Dockerfile.dev`, `npm run start:worker:dev`, depending on healthy `db`, `redis`, `minio`).
+5. Update `nestjs-project/compose.yaml` to add `minio` (`minio/minio:latest`, ports `9000`/`9001`, healthcheck; _Revised 2026-11-20 (final review)_: shipped as `pgsty/silo:RELEASE.2026-11-12T00-00-00Z`, since `minio/minio` returned `pull access denied`), `redis` (`redis:7-alpine`, port `6379`, AOF persistence, healthcheck), and `video-worker` (built from `Dockerfile.dev`, `npm run start:worker:dev`, depending on healthy `db`, `redis`, `minio`).
 
 **Tests:**
 
@@ -194,10 +194,10 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
    - `probeVideo(inputUrlOrPath: string)`: runs `ffprobe -v quiet -print_format json -show_format -show_streams <input>` via `execFile`, parsing `durationSeconds` (float), `width` (int), `height` (int), `codec` (`codec_name` of first video stream).
    - `generateThumbnail(inputUrlOrPath: string, durationSeconds: number)`: computes target timestamp (`durationSeconds >= 1 ? 1 : 0`), runs `ffmpeg -y -ss <ts> -i <input> -vframes 1 -q:v 2 -f image2 <tempJpg>`, reads JPEG buffer, and cleans up temp file in `finally`.
 2. Create `src/videos/video-processing.processor.ts` (`@Processor(VIDEO_PROCESSING_QUEUE, { concurrency: 2 })` extending `WorkerHost`):
-   - `process(job)`: fetches video row, obtains presigned GET URL (internal MinIO endpoint) for `storage_key` (or downloads to temp file if needed), calls `probeVideo` + `generateThumbnail`, uploads JPEG to `thumbnails/{channelId}/{videoId}/thumb.jpg` via `S3StorageService.putObject`, updates `Video` (`status = 'ready'`, `thumbnail_key`, `duration_seconds`, `width`, `height`, `codec`, `size_bytes`, `processing_error = null`).
+   - `process(job)`: fetches video row, obtains presigned GET URL (internal MinIO endpoint) for `storage_key` (or downloads to temp file if needed), calls `probeVideo` + `generateThumbnail`, uploads JPEG to `thumbnails/{channelId}/{videoId}/thumb.jpg` via `S3StorageService.putObject`, updates `Video` (`status = 'ready'`, `thumbnail_key`, `duration_seconds`, `width`, `height`, `codec`; _Revised 2026-11-20 (final review)_: `size_bytes` is set by the API from `HeadObject` at complete, not by the worker, `processing_error = null`).
    - `@OnWorkerEvent('failed')`: when `job.attemptsMade >= (job.opts.attempts ?? 1)`, sets `status = 'failed'` and stores truncated `processing_error`.
 3. Create `src/worker.module.ts` (imports `ConfigModule`, `TypeOrmModule.forRootAsync`, `BullModule.forRootAsync`, `BullModule.registerQueue`, `StorageModule`, provides `MediaProcessorService` and `VideoProcessingProcessor`) and `src/worker.main.ts` (`NestFactory.createApplicationContext(WorkerModule)` with `app.enableShutdownHooks()`).
-4. Add `"start:worker": "node dist/worker.main"` and `"start:worker:dev": "nest start --watch --entryFile worker.main"` scripts to `nestjs-project/package.json`.
+4. Add `"start:worker": "node dist/worker.main"` and `"start:worker:dev": "nest start --watch --entryFile worker.main"` scripts (_Revised 2026-11-20 (final review)_: shipped as `ts-node -r tsconfig-paths/register src/worker.main.ts`, without watch; the compose `video-worker` runs `node -r ts-node/register ...` directly so SIGTERM reaches Nest) to `nestjs-project/package.json`.
 
 **Tests:**
 
@@ -253,7 +253,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 1. Create `src/videos/dto/video-response.dto.ts` (response shapes for initiate, sign-part, complete, and video metadata/status) for clean `@ApiResponse` OpenAPI documentation.
 2. Create `src/videos/videos.controller.ts` implementing all routes in `### API Contracts` and `### Authorization Matrix`:
-   - Protected (`@ApiBearerAuth('access-token')`): `POST /videos/uploads/initiate`, `POST /videos/:id/uploads/parts`, `POST /videos/:id/uploads/complete`, `POST /videos/:id/uploads/abort`, `GET /videos/me`, `GET /videos/:id`.
+   - Protected (`@ApiBearerAuth('access-token')`): `POST /videos/uploads/initiate`, `POST /videos/:id/uploads/parts`, `POST /videos/:id/uploads/complete`, `POST /videos/:id/uploads/abort`, `GET /videos/:id/uploads/parts`, `GET /videos/me`, `GET /videos/:id/status` (_Revised 2026-11-20 (final review)_: the route is `/:id/status`; `uploads/parts` GET was added to resume uploads).
    - Public (`@Public()`): `GET /videos/:shortCode`, `GET /videos/:shortCode/stream`, `GET /videos/:shortCode/download`, `GET /videos/:shortCode/thumbnail`.
    - Note route ordering in NestJS controller: static/specific prefixes (`uploads/initiate`, `me`, `:id/uploads/...`) declared carefully before `:shortCode` (or distinguish UUID `:id` vs `shortCode` via `ParseUUIDPipe` / route prefixes so `:id` and `:shortCode` never collide! Specifically: `GET /videos/me` before `GET /videos/watch/:shortCode` OR `GET /videos/by-id/:id` vs `GET /videos/:shortCode` — see `### API Contracts` below where `:id` status is `GET /videos/:id/status` and public metadata is `GET /videos/:shortCode` so zero NestJS route ambiguity exists!).
 3. Create `src/videos/videos.module.ts` importing `TypeOrmModule.forFeature([Video])`, `BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE })`, `ChannelsModule`, `StorageModule`, and register `VideosModule` in `AppModule`.
@@ -335,9 +335,10 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 | Field | Type | Constraints |
 |---|---|---|
 | `id` | `uuid` | PK, generated (`uuid_generate_v4()`) |
-| `channel_id` | `uuid` | FK → `channels.id`, not null, indexed |
+| `channel_id` | `uuid` | FK → `channels.id` (`ON DELETE NO ACTION`), not null; covered by the `(channel_id, status)` index |
 | `short_code` | `varchar(16)` | unique, not null (11-char base64url per `phase-03-videos/TD-06`) |
-| `title` | `varchar(255)` | not null |
+| `title` | `varchar(255)` | not null (trimmed) |
+| `original_filename` | `varchar(255)` | not null (trimmed; used for the download `Content-Disposition`) |
 | `status` | `enum('draft','processing','ready','failed')` | not null, default `'draft'` (per `phase-03-videos/TD-04`) |
 | `storage_key` | `varchar(512)` | nullable during pre-S3 init, unique when set |
 | `thumbnail_key` | `varchar(512)` | nullable |
@@ -349,11 +350,11 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 | `height` | `integer` | nullable (populated by `ffprobe`) |
 | `codec` | `varchar(64)` | nullable (populated by `ffprobe`) |
 | `processing_error` | `text` | nullable (populated on `failed`) |
-| `created_at` | `timestamptz` | default `now()` |
-| `updated_at` | `timestamptz` | default `now()`, auto-updated |
+| `created_at` | `timestamp` (without time zone) | default `now()` |
+| `updated_at` | `timestamp` (without time zone) | default `now()`, auto-updated |
 
 **Relations:** `Video` belongs to `Channel` (`ManyToOne(() => Channel)`); `Channel` has many `Video`.
-**Indexes:** unique index on `short_code`; composite index on `(channel_id, status)`.
+**Indexes:** unique index on `short_code`; unique `storage_key`; composite index on `(channel_id, status)`. _Revised 2026-11-20 (final review)_: the migration had also created a single-column `channel_id` index, redundant with the composite one; `1795194064003-DropRedundantVideosChannelIndex` drops it, and the table above now matches the entity and migrations (`original_filename` was missing; timestamps are `timestamp`, not `timestamptz`).
 
 ---
 
@@ -412,6 +413,16 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 ---
 
+#### GET /videos/:id/uploads/parts (_Revised 2026-11-20 (final review)_)
+
+Lets a client that lost its ETags (reload, crash) resume the upload, as `project-plan.md` §4 requires.
+
+**Response 200:** `{ parts: Array<{ partNumber: number; etag: string; sizeBytes: number }> }`, ascending by `partNumber`, ready for `/uploads/complete`.
+
+**Error responses:** `401`, `403 VIDEO_ACCESS_DENIED`, `404 VIDEO_NOT_FOUND`, `409 VIDEO_INVALID_STATE` (not a draft).
+
+---
+
 #### POST /videos/:id/uploads/complete (SI-03.6)
 
 **Request headers:**
@@ -419,7 +430,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 - `Content-Type: application/json`
 
 **Request body:**
-- `parts`: `Array<{ partNumber: number; etag: string }>`, required, min 1 item
+- `parts`: `Array<{ partNumber: number; etag: string }>`, required, 1 to 10 000 items, in any order (the API sorts them) (_Revised 2026-11-20 (final review)_: JSON body limit raised to 1 MB so 10 000 parts fit)
 
 **Response 202:**
 - `videoId`: `string` (`uuid`)
@@ -478,8 +489,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 **Response 200:** Public video metadata (`id`, `shortCode`, `title`, `status`, `mimeType`, `sizeBytes`, `durationSeconds`, `width`, `height`, `codec`, `streamUrl`, `downloadUrl`, `thumbnailUrl`, `createdAt`).
 
 **Error responses:**
-- `404 VIDEO_NOT_FOUND`: no video with `shortCode`
-- `409 VIDEO_NOT_READY`: video exists but `status !== 'ready'`
+- `404 VIDEO_NOT_FOUND`: no video with `shortCode`, or the video is not `ready` (_Revised 2026-11-20 (final review)_: was `409 VIDEO_NOT_READY`, which confirmed that an unpublished shortCode exists)
 
 ---
 
@@ -490,12 +500,12 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Response 206 (with `Range` header) / 200 (without `Range` header):**
 - Binary video stream piped directly from S3/MinIO
-- Response headers: `Accept-Ranges: bytes`, `Content-Type`, `Content-Length`, and on `206`: `Content-Range: bytes start-end/total`
+- Response headers: `Accept-Ranges: bytes`, `Content-Type`, `Content-Length`, `ETag`, `Cache-Control: no-cache`, and on `206`: `Content-Range: bytes start-end/total`
+- `HEAD` returns the same headers without reading storage; `If-None-Match` matching the `ETag` returns `304` (_Revised 2026-11-20 (final review)_)
 
 **Error responses:**
-- `404 VIDEO_NOT_FOUND`
-- `409 VIDEO_NOT_READY`
-- `416 INVALID_RANGE`: malformed or out-of-bounds `Range` header
+- `404 VIDEO_NOT_FOUND` (also when not `ready`)
+- `416 INVALID_RANGE`: malformed or out-of-bounds `Range` header; carries `Content-Range: bytes */total` (_Revised 2026-11-20 (final review)_)
 
 ---
 
@@ -503,20 +513,21 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Response 200:**
 - Binary video stream piped from S3/MinIO
-- Response headers: `Content-Type`, `Content-Length`, `Content-Disposition: attachment; filename="<sanitized>"`
+- Response headers: `Content-Type`, `Content-Length`, `ETag`, `Cache-Control: no-cache`, `Content-Disposition: attachment; filename="<ASCII fallback>"; filename*=UTF-8''<encoded original>` (RFC 6266; _Revised 2026-11-20 (final review)_: a raw non-Latin-1 name made Node reject the header with 500)
+- `HEAD` / `304` as in `/stream`
 
 **Error responses:**
-- `404 VIDEO_NOT_FOUND`, `409 VIDEO_NOT_READY`
+- `404 VIDEO_NOT_FOUND` (also when not `ready`)
 
 ---
 
 #### GET /videos/:shortCode/thumbnail (SI-03.8, SI-03.9)
 
 **Response 200:**
-- JPEG image stream piped from S3/MinIO (`Content-Type: image/jpeg`, `Content-Length`)
+- JPEG image stream piped from S3/MinIO (`Content-Type: image/jpeg`, `Content-Length`, `ETag`, `Cache-Control: no-cache`; `HEAD` / `304` as in `/stream`)
 
 **Error responses:**
-- `404 VIDEO_NOT_FOUND`, `409 VIDEO_NOT_READY`
+- `404 VIDEO_NOT_FOUND` (also when not `ready`)
 
 ---
 
@@ -528,6 +539,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 | `POST /videos/:id/uploads/parts` | ✗ | ✓ | ✓ | Must own video's channel |
 | `POST /videos/:id/uploads/complete` | ✗ | ✓ | ✓ | Must own video's channel |
 | `POST /videos/:id/uploads/abort` | ✗ | ✓ | ✓ | Must own video's channel |
+| `GET /videos/:id/uploads/parts` | ✗ | ✓ | ✓ | Must own video's channel; draft only |
 | `GET /videos/me` | ✗ | ✓ | ✓ | Lists caller's channel videos |
 | `GET /videos/:id/status` | ✗ | ✓ | ✓ | Owner-only status/error inspection |
 | `GET /videos/:shortCode` | ✓ | ✓ | ✓ | `@Public()`, requires `status === 'ready'` |
@@ -544,14 +556,15 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
 | `errorCode` | HTTP | Trigger |
 |---|---|---|
 | `CHANNEL_NOT_FOUND` | 404 | Authenticated user has no channel record |
-| `VIDEO_NOT_FOUND` | 404 | Video `id` or `shortCode` does not exist |
+| `VIDEO_NOT_FOUND` | 404 | Video `id` or `shortCode` does not exist, or a public route asks for a video that is not `ready` (_Revised 2026-11-20 (final review)_: replaces `409 VIDEO_NOT_READY`) |
 | `VIDEO_ACCESS_DENIED` | 403 | Authenticated user attempts to sign/complete/abort/inspect a video owned by another channel |
 | `VIDEO_INVALID_STATE` | 409 | Upload part/complete/abort requested on a video not in `draft` status |
-| `VIDEO_NOT_READY` | 409 | Public metadata/stream/download/thumbnail requested for a video whose status is not `ready` |
+| `TOO_MANY_OPEN_UPLOADS` | 409 | Initiate while the channel already holds `VIDEO_MAX_OPEN_DRAFTS` (5) drafts |
 | `UPLOAD_LIMIT_EXCEEDED` | 413 | Declared `sizeBytes` or actual S3 `HeadObject` size exceeds `10737418240` bytes (10 GiB) |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | `mimeType` not in `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska` |
-| `INVALID_UPLOAD_PARTS` | 400 | Empty, duplicate, unsorted, or S3-rejected multipart upload parts on complete |
-| `INVALID_RANGE` | 416 | Malformed or unsatisfiable HTTP `Range` header on `/stream` |
+| `INVALID_UPLOAD_PARTS` | 400 | Duplicate or S3-rejected multipart upload parts on complete (empty lists fail validation; unsorted lists are sorted, not rejected) |
+| `INVALID_RANGE` | 416 | Malformed or unsatisfiable HTTP `Range` header on `/stream` (response carries `Content-Range: bytes */size`) |
+| _(throttler)_ | 429 | More than 10 `POST /videos/uploads/initiate` per minute |
 
 ---
 

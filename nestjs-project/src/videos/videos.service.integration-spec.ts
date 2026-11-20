@@ -121,18 +121,18 @@ describe('VideosService (integration)', () => {
       'StreamInt11',
       'bytes=10-15',
     );
-    const partialBuf = await streamToBuffer(partial.stream);
+    const partialBuf = await streamToBuffer((await partial.open()).stream);
     expect(partial.isPartial).toBe(true);
     expect(partial.contentRange).toBe(`bytes 10-15/${videoBytes.length}`);
     expect(partialBuf.toString('utf8')).toBe('abcdef');
 
     const download = await videosService.getVideoDownload('StreamInt11');
-    const fullBuf = await streamToBuffer(download.stream);
+    const fullBuf = await streamToBuffer((await download.open()).stream);
     expect(download.filename).toBe('stream-test.mp4');
     expect(fullBuf).toEqual(videoBytes);
 
     const thumb = await videosService.getThumbnailStream('StreamInt11');
-    const thumbBuf = await streamToBuffer(thumb.stream);
+    const thumbBuf = await streamToBuffer((await thumb.open()).stream);
     expect(thumb.contentType).toBe('image/jpeg');
     expect(thumbBuf).toEqual(thumbBytes);
   });

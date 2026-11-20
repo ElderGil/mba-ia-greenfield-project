@@ -1,8 +1,6 @@
 ---
-paths:
-  - 'next-frontend/components/**/*.tsx'
-  - 'next-frontend/app/**/*.tsx'
-  - 'next-frontend/app/**/*.css'
+trigger: glob
+globs: "next-frontend/components/**/*.tsx, next-frontend/app/**/*.tsx, next-frontend/app/**/*.css"
 description: 'UI rules: design tokens (no hardcoding), shadcn primitive pattern, custom icon components'
 ---
 
