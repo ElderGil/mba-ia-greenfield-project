@@ -3,13 +3,13 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-11-16T16:15:32-0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-16T21:27:05-0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-20T14:12:31-0300"
   docs/decisions/technical-decisions-phase-02-auth.md: "2026-11-16T16:15:32-0300"
   docs/decisions/technical-decisions-phase-01-configuracao-base.md: "2026-11-16T16:15:32-0300"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-11-16T16:15:32-0300"
   docs/phases/phase-01-configuracao-base/context.md: "2026-11-16T16:15:32-0300"
   docs/phases/phase-02-auth/context.md: "2026-11-16T16:15:32-0300"
-  .agents/skills/testing-guide-nestjs-project/SKILL.md: "2026-11-16T16:23:12-0300"
+  .agents/skills/testing-guide-nestjs-project/SKILL.md: "2026-11-16T22:17:28-0300"
 ---
 
 # phase-03-videos — Context
@@ -82,7 +82,7 @@ _Source files:_
 
 ### phase-03-videos/TD-02
 
-**Recommendation:** S3 Multipart Upload with Presigned Part URLs — Single `PUT` caps at 5GB and cannot meet the 10GB requirement; S3 multipart keeps 100% of binary upload traffic off the NestJS API and supports per-part resume without extra server containers. Resolved constraints (AMB-1): max size `10737418240` bytes (10 GiB), default part size `10485760` bytes (10 MiB, configurable 5 MiB–100 MiB), allowed MIME types `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`.
+**Recommendation:** S3 Multipart Upload with Presigned Part URLs — Single `PUT` caps at 5GB and cannot meet the 10GB requirement; S3 multipart keeps 100% of binary upload traffic off the NestJS API and supports per-part resume without extra server containers. Resolved constraints (AMB-1): max size `10737418240` bytes (10 GiB), default part size `10485760` bytes (10 MiB, configurable 5 MiB–100 MiB), allowed MIME types `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`. Revised 2026-11-20 (TD-02 revision): resumable via `GET /videos/:id/uploads/parts` (S3 `ListParts`); initiate throttled 10/min and capped at `VIDEO_MAX_OPEN_DRAFTS` (5) open drafts per channel (`409 TOO_MANY_OPEN_UPLOADS`); up to 10 000 parts on complete; presigned part URLs signed without a checksum.
 
 **Libraries:** `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`
 
@@ -94,13 +94,13 @@ _Source files:_
 
 ### phase-03-videos/TD-04
 
-**Recommendation:** 4-State Lifecycle (`draft` → `processing` → `ready` | `failed`) — Directly matches `project-plan.md`, supports atomic `draft → processing` transition on upload completion, and cleanly represents terminal processing failures.
+**Recommendation:** 4-State Lifecycle (`draft` → `processing` → `ready` | `failed`) — Directly matches `project-plan.md`, supports atomic `draft → processing` transition on upload completion, and cleanly represents terminal processing failures. Revised 2026-11-20 (TD-04 revision): a 15-min maintenance sweep deletes drafts older than 24 h (aborting the multipart upload) and fails `processing` videos idle for 30 min without a live job; a BullMQ `UnrecoverableError` is a final failure.
 
 **Libraries:** —
 
 ### phase-03-videos/TD-05
 
-**Recommendation:** Dedicated `video-worker` Container + Native `ffmpeg`/`ffprobe` via `child_process` — Matches the target C4 architecture, avoids deprecated `fluent-ffmpeg`, and keeps API responsiveness isolated from FFmpeg workloads. Resolved extraction contract (AMB-2): persists `durationSeconds` (float/numeric), `width`, `height`, `codec`, `mimeType`, `sizeBytes`, and generates JPEG thumbnail `thumb.jpg` at `1s` with `0s` fallback for clips shorter than 1s.
+**Recommendation:** Dedicated `video-worker` Container + Native `ffmpeg`/`ffprobe` via `child_process` — Matches the target C4 architecture, avoids deprecated `fluent-ffmpeg`, and keeps API responsiveness isolated from FFmpeg workloads. Resolved extraction contract (AMB-2): persists `durationSeconds` (float/numeric), `width`, `height`, `codec`, `mimeType`, `sizeBytes`, and generates JPEG thumbnail `thumb.jpg` at `1s` with `0s` fallback for clips shorter than 1s. Revised 2026-11-20 (TD-05 revision): `sizeBytes`/`mimeType` are persisted by the API (HeadObject / initiate), not extracted by the worker; demuxer forced from the stored MIME with a protocol whitelist; thumbnail at `min(1s, duration/2)` with first-frame fallback; URLs redacted from stored errors; worker receives SIGTERM directly.
 
 **Libraries:** —
 
@@ -112,7 +112,7 @@ _Source files:_
 
 ### phase-03-videos/TD-07
 
-**Recommendation:** API Byte-Range `206 Partial Content` Stream Proxy + `Content-Disposition: attachment` Download — Delivers true seekable streaming without full-file download or memory buffering, avoids MinIO Docker/host SigV4 host-mismatch issues, enforces domain status/access rules in the API, and keeps the route contract clean for Phase 05's video player. Resolved access policy (AMB-3): `GET /videos/:shortCode`, `GET /videos/:shortCode/stream`, `GET /videos/:shortCode/download`, and `GET /videos/:shortCode/thumbnail` are `@Public()` when `status === 'ready'`; upload/abort/status endpoints require JWT (`JwtAuthGuard`) + channel ownership.
+**Recommendation:** API Byte-Range `206 Partial Content` Stream Proxy + `Content-Disposition: attachment` Download — Delivers true seekable streaming without full-file download or memory buffering, avoids MinIO Docker/host SigV4 host-mismatch issues, enforces domain status/access rules in the API, and keeps the route contract clean for Phase 05's video player. Resolved access policy (AMB-3): `GET /videos/:shortCode`, `GET /videos/:shortCode/stream`, `GET /videos/:shortCode/download`, and `GET /videos/:shortCode/thumbnail` are `@Public()` when `status === 'ready'`; upload/abort/status endpoints require JWT (`JwtAuthGuard`) + channel ownership. Revised 2026-11-20 (TD-07 revision): non-`ready` videos answer `404` on public routes (was `409`); `HEAD`, `ETag`/`304`, `416` with `Content-Range: bytes */size`, RFC 6266 `Content-Disposition`.
 
 **Libraries:** `@aws-sdk/client-s3`
 
