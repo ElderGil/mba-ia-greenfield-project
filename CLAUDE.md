@@ -18,7 +18,7 @@ This is a monorepo with three main areas:
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST and streams video from the API (`/videos/:shortCode/stream`); the bucket is private, so the browser talks to storage only to `PUT` upload parts through presigned URLs
+- **Frontend** (Next.js) → calls API via REST (today: the auth screens of Phases 01–02; it has no video screen yet). Target architecture for video: it streams from the API (`/videos/:shortCode/stream`, player in Phase 05) and, the bucket being private, talks to storage only to `PUT` upload parts through presigned URLs
 - **API** (Nest.js `nestjs-api`) → business rules, auth, reads/writes DB, issues S3 presigned multipart URLs, streams byte-range playback (`206`) & downloads, publishes jobs to queue, sends emails
 - **Video Worker** (Nest.js `video-worker` + FFmpeg/ffprobe) → consumes `video-processing` jobs from BullMQ/Redis, extracts duration/metadata and JPEG thumbnail, updates DB and storage; runs the 15-min maintenance sweep (stale drafts, orphaned `processing` videos)
 - **Database** (PostgreSQL 17) → `users`, `channels`, `refresh_tokens`, `verification_tokens`, `videos`
