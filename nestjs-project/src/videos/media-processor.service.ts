@@ -75,6 +75,13 @@ const DEMUXER_BY_MIME: Readonly<Record<string, string>> = {
   'video/x-matroska': 'matroska',
 };
 
+// `V` (capital) selects video streams that are not attached pictures: the
+// cover art of an audio file is listed as a video stream, and would
+// otherwise pass as the video (an mp3-like file published as "video").
+// ffprobe and ffmpeg use the same specifier, so the thumbnail comes from the
+// track the metadata describes.
+const VIDEO_TRACK = 'V:0';
+
 function inputArgs(inputUrlOrPath: string, mimeType: string): string[] {
   const demuxer = DEMUXER_BY_MIME[mimeType];
   if (!demuxer) {
@@ -105,8 +112,10 @@ export class MediaProcessorService {
       'error',
       '-print_format',
       'json',
-      '-show_format',
-      '-show_streams',
+      '-select_streams',
+      VIDEO_TRACK,
+      '-show_entries',
+      'format=duration:stream=codec_type,codec_name,width,height,duration',
       ...inputArgs(inputUrlOrPath, mimeType),
     ]);
 
@@ -168,6 +177,8 @@ export class MediaProcessorService {
         '-ss',
         String(seekSeconds),
         ...inputArgs(inputUrlOrPath, mimeType),
+        '-map',
+        `0:${VIDEO_TRACK}`,
         '-vframes',
         '1',
         '-q:v',
