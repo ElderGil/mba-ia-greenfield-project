@@ -52,10 +52,15 @@ export class VideoProcessingProcessor
       storageKey,
       900,
     );
-    const metadata = await this.mediaProcessor.probeVideo(inputUrl);
+    // The MIME stored at initiate drives the demuxer (see MediaProcessorService).
+    const metadata = await this.mediaProcessor.probeVideo(
+      inputUrl,
+      video.mime_type,
+    );
     const thumbnailBuffer = await this.mediaProcessor.generateThumbnail(
       inputUrl,
       metadata.durationSeconds,
+      video.mime_type,
     );
 
     const thumbnailKey = `thumbnails/${channelId}/${videoId}/thumb.jpg`;

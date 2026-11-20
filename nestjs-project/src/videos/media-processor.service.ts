@@ -30,9 +30,42 @@ interface FfprobeOutput {
   streams?: FfprobeStream[];
 }
 
+// The demuxer is forced from the MIME the upload declared. Left to
+// auto-detection, ffprobe/ffmpeg accept images (PNG/GIF) as "video" and
+// open an HLS playlist disguised as .mp4, fetching every URL it lists from
+// inside the worker (SSRF).
+const DEMUXER_BY_MIME: Readonly<Record<string, string>> = {
+  'video/mp4': 'mov',
+  'video/quicktime': 'mov',
+  'video/webm': 'matroska',
+  'video/x-matroska': 'matroska',
+};
+
+function inputArgs(inputUrlOrPath: string, mimeType: string): string[] {
+  const demuxer = DEMUXER_BY_MIME[mimeType];
+  if (!demuxer) {
+    throw new Error(`Unsupported media type for processing: ${mimeType}`);
+  }
+  // Only the protocol the input itself uses may be opened.
+  const protocols = /^https?:\/\//i.test(inputUrlOrPath)
+    ? 'http,https,tcp,tls'
+    : 'file';
+  return [
+    '-protocol_whitelist',
+    protocols,
+    '-f',
+    demuxer,
+    '-i',
+    inputUrlOrPath,
+  ];
+}
+
 @Injectable()
 export class MediaProcessorService {
-  async probeVideo(inputUrlOrPath: string): Promise<VideoProbeMetadata> {
+  async probeVideo(
+    inputUrlOrPath: string,
+    mimeType: string,
+  ): Promise<VideoProbeMetadata> {
     const { stdout } = await execFileAsync(
       'ffprobe',
       [
@@ -42,7 +75,7 @@ export class MediaProcessorService {
         'json',
         '-show_format',
         '-show_streams',
-        inputUrlOrPath,
+        ...inputArgs(inputUrlOrPath, mimeType),
       ],
       { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 },
     );
@@ -72,6 +105,7 @@ export class MediaProcessorService {
   async generateThumbnail(
     inputUrlOrPath: string,
     durationSeconds: number,
+    mimeType: string,
   ): Promise<Buffer> {
     const seekSeconds = durationSeconds >= 1 ? 1 : 0;
     const outputPath = path.join(os.tmpdir(), `thumb-${randomUUID()}.jpg`);
@@ -83,8 +117,7 @@ export class MediaProcessorService {
           '-y',
           '-ss',
           String(seekSeconds),
-          '-i',
-          inputUrlOrPath,
+          ...inputArgs(inputUrlOrPath, mimeType),
           '-vframes',
           '1',
           '-q:v',

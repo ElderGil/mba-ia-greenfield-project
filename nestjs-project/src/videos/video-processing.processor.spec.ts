@@ -52,7 +52,10 @@ describe('VideoProcessingProcessor', () => {
   } as unknown as Job<VideoProcessingJobData>;
 
   it('probes video, uploads thumbnail, and marks video ready', async () => {
-    mockVideoRepo.findOne.mockResolvedValue({ id: 'v1' });
+    mockVideoRepo.findOne.mockResolvedValue({
+      id: 'v1',
+      mime_type: 'video/webm',
+    });
     mockStorageService.getPresignedGetUrl.mockResolvedValue(
       'http://minio:9000/signed',
     );
@@ -67,6 +70,16 @@ describe('VideoProcessingProcessor', () => {
 
     await processor.process(job);
 
+    // The stored MIME (not auto-detection) drives the demuxer.
+    expect(mockMediaProcessor.probeVideo).toHaveBeenCalledWith(
+      'http://minio:9000/signed',
+      'video/webm',
+    );
+    expect(mockMediaProcessor.generateThumbnail).toHaveBeenCalledWith(
+      'http://minio:9000/signed',
+      12.5,
+      'video/webm',
+    );
     expect(mockStorageService.putObject).toHaveBeenCalledWith(
       'thumbnails/c1/v1/thumb.jpg',
       thumb,
