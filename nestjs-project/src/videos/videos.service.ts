@@ -24,7 +24,6 @@ export interface VideoStreamPayload {
   etag: string;
   contentType: string;
   contentLength: number;
-  totalSize: number;
   isPartial: boolean;
   contentRange?: string;
 }
@@ -37,11 +36,11 @@ export interface VideoDownloadPayload {
   filename: string;
 }
 
+// No Content-Length up front: sendMedia takes it from the opened object.
 export interface VideoThumbnailPayload {
   open: () => Promise<OpenedMedia>;
   etag: string;
   contentType: string;
-  contentLength?: number;
 }
 
 // A ready video's bytes never change (there is no re-upload), so id + size
@@ -180,7 +179,6 @@ export class VideosService {
         etag,
         contentType: video.mime_type,
         contentLength: end - start + 1,
-        totalSize,
         isPartial: true,
         contentRange: `bytes ${start}-${end}/${totalSize}`,
       };
@@ -191,7 +189,6 @@ export class VideosService {
       etag,
       contentType: video.mime_type,
       contentLength: totalSize,
-      totalSize,
       isPartial: false,
     };
   }
