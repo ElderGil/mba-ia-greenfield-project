@@ -282,4 +282,51 @@ describe('VideoMaintenanceService (integration)', () => {
       jest.restoreAllMocks();
     }
   });
+
+  it('reaches drafts beyond a full batch of drafts it cannot remove', async () => {
+    const userId = await createOwnerId();
+    const channel = await channelsService.findByUserId(userId);
+    // 100 stale drafts (a whole batch) whose abort keeps failing, all older
+    // than one removable draft.
+    const stuck = Array.from({ length: 100 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      upload_id: `stuck-${i}`,
+      storage_key: `videos/stuck/${i}/original.mp4`,
+      short_code: `Stuck${String(i).padStart(6, '0')}`,
+    }));
+    const removable = {
+      id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+      upload_id: null,
+      storage_key: null,
+      short_code: 'Removable01',
+    };
+    await videoRepo.insert(
+      [...stuck, removable].map((row) => ({
+        ...row,
+        channel_id: channel!.id,
+        title: 'Stale',
+        original_filename: 'stale.mp4',
+        status: VideoStatus.DRAFT,
+        mime_type: 'video/mp4',
+        size_bytes: '1024',
+      })),
+    );
+    await dataSource.query(
+      `UPDATE videos SET created_at = now() - interval '26 hours' WHERE upload_id IS NOT NULL`,
+    );
+    await age(removable.id, 'created_at', '25 hours');
+    jest
+      .spyOn(storageService, 'abortMultipartUpload')
+      .mockRejectedValue(new Error('storage unavailable'));
+
+    try {
+      const result = await maintenance.sweep(new Date());
+
+      expect(result.abortedDrafts).toBe(1);
+      expect(await videoRepo.findOneBy({ id: removable.id })).toBeNull();
+      expect(await videoRepo.count()).toBe(100);
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
 });
