@@ -78,6 +78,11 @@ describe('S3StorageService (integration)', () => {
       300,
     );
     expect(presignedUrl).toContain(key);
+    // A signed checksum of an empty body (CRC32 AAAAAA==) is accepted by
+    // MinIO but makes real S3 reject the client's PUT with BadDigest.
+    expect(presignedUrl).not.toMatch(
+      /x-amz-checksum-|x-amz-sdk-checksum-algorithm/i,
+    );
 
     const putRes = await fetch(presignedUrl, {
       method: 'PUT',

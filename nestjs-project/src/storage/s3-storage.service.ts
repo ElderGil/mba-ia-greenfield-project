@@ -62,13 +62,15 @@ export class S3StorageService implements OnModuleInit {
       endpoint: config.endpoint,
     });
 
-    this.presignClient =
-      config.publicEndpoint !== config.endpoint
-        ? new S3Client({
-            ...baseOptions,
-            endpoint: config.publicEndpoint,
-          })
-        : this.client;
+    // Presigned URLs are used by someone else's HTTP client, so the SDK
+    // must not sign a checksum it computed over an empty body: with the
+    // default WHEN_SUPPORTED it adds x-amz-checksum-crc32=AAAAAA== to every
+    // UploadPart URL, which MinIO ignores and S3 rejects (BadDigest).
+    this.presignClient = new S3Client({
+      ...baseOptions,
+      endpoint: config.publicEndpoint,
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+    });
   }
 
   async onModuleInit(): Promise<void> {
