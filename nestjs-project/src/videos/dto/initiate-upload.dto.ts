@@ -8,6 +8,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { VIDEO_MIME_TYPES } from '../videos.constants';
 
 // "   " must fail @IsNotEmpty like "" does; the trimmed value is stored.
 function trimString({ value }: { value: unknown }): unknown {
@@ -32,7 +33,7 @@ export class InitiateUploadDto {
 
   @ApiProperty({
     example: 'video/mp4',
-    enum: ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska'],
+    enum: VIDEO_MIME_TYPES,
   })
   @IsString()
   @IsNotEmpty()

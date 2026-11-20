@@ -30,11 +30,7 @@ import {
   isNoSuchUpload,
   isObjectNotFound,
 } from './video-upload-session';
-import {
-  ALLOWED_VIDEO_MIME_TYPES,
-  MAX_MULTIPART_PARTS,
-  MIME_TO_EXTENSION,
-} from './videos.constants';
+import { MAX_MULTIPART_PARTS, videoFormatOf } from './videos.constants';
 
 const PG_UNIQUE_VIOLATION = '23505';
 const NOT_A_DRAFT_MESSAGE =
@@ -118,7 +114,8 @@ export class VideosUploadService {
     userId: string,
     dto: InitiateUploadDto,
   ): Promise<InitiateUploadResult> {
-    if (!ALLOWED_VIDEO_MIME_TYPES.has(dto.mimeType)) {
+    const format = videoFormatOf(dto.mimeType);
+    if (!format) {
       throw new UnsupportedMediaTypeException(dto.mimeType);
     }
 
@@ -144,8 +141,7 @@ export class VideosUploadService {
       channel.id,
       dto,
     );
-    const ext = MIME_TO_EXTENSION[dto.mimeType] ?? 'mp4';
-    const storageKey = `videos/${channel.id}/${video.id}/original.${ext}`;
+    const storageKey = `videos/${channel.id}/${video.id}/original.${format.extension}`;
 
     let uploadId: string | undefined;
     try {

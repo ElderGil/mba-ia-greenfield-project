@@ -5,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
+import { videoFormatOf } from './videos.constants';
 
 const execFileAsync = promisify(execFile);
 
@@ -64,16 +65,10 @@ interface FfprobeOutput {
   streams?: FfprobeStream[];
 }
 
-// The demuxer is forced from the MIME the upload declared. Left to
-// auto-detection, ffprobe/ffmpeg accept images (PNG/GIF) as "video" and
-// open an HLS playlist disguised as .mp4, fetching every URL it lists from
-// inside the worker (SSRF).
-const DEMUXER_BY_MIME: Readonly<Record<string, string>> = {
-  'video/mp4': 'mov',
-  'video/quicktime': 'mov',
-  'video/webm': 'matroska',
-  'video/x-matroska': 'matroska',
-};
+// The demuxer is forced from the MIME the upload declared (VIDEO_FORMATS).
+// Left to auto-detection, ffprobe/ffmpeg accept images (PNG/GIF) as "video"
+// and open an HLS playlist disguised as .mp4, fetching every URL it lists
+// from inside the worker (SSRF).
 
 // `V` (capital) selects video streams that are not attached pictures: the
 // cover art of an audio file is listed as a video stream, and would
@@ -83,7 +78,7 @@ const DEMUXER_BY_MIME: Readonly<Record<string, string>> = {
 const VIDEO_TRACK = 'V:0';
 
 function inputArgs(inputUrlOrPath: string, mimeType: string): string[] {
-  const demuxer = DEMUXER_BY_MIME[mimeType];
+  const demuxer = videoFormatOf(mimeType)?.demuxer;
   if (!demuxer) {
     throw new Error(`Unsupported media type for processing: ${mimeType}`);
   }
