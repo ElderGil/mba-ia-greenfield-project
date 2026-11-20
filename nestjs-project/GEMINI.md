@@ -92,7 +92,7 @@ curl http://localhost:3000
 
 ### Test execution
 
-Integration and e2e suites share a single test database, so they must run serially. Both Jest configs set `maxWorkers: 1`, so the plain commands are already serial (`--runInBand` is equivalent):
+Integration and e2e suites share one test database (`streamtube_test`), so they must run serially. Both Jest configs set `maxWorkers: 1`, so the plain commands are already serial (`--runInBand` is equivalent):
 
 ```bash
 docker compose exec nestjs-api npm test
@@ -101,7 +101,13 @@ docker compose exec nestjs-api npm run test:e2e
 
 Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently (reproduced with `--maxWorkers=4`: 8 unit/integration and 5 e2e failures).
 
-The video suites need the `minio`, `redis` and `video-worker`-image tooling (`ffmpeg`/`ffprobe`, installed by `Dockerfile.dev`) in addition to `db`. They use the BullMQ prefix `streamtube-test` (forced by `src/test/test-env.ts`), so the compose `video-worker` never picks up test jobs and `queue.obliterate()` in the suites never touches real ones.
+Tests never touch the development data:
+
+- `src/test/test-env.ts` rewrites `DB_NAME` to `<DB_NAME>_test` and `S3_BUCKET` to `<S3_BUCKET>-test`, and forces the BullMQ prefix `streamtube-test`, so the compose `video-worker` never picks up test jobs and `queue.obliterate()` never touches real ones.
+- `src/test/global-setup.ts` (Jest `globalSetup`) creates the test database when missing and migrates it with the CLI DataSource (`src/database/data-source.ts`): the schema comes from the migrations, never from `synchronize`.
+- `cleanAllTables()` and the migrations spec refuse to run on a database whose name does not end in `_test`.
+
+The video suites need the `minio`, `redis` and `video-worker`-image tooling (`ffmpeg`/`ffprobe`, installed by `Dockerfile.dev`) in addition to `db`.
 
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
@@ -129,8 +135,9 @@ Conventions for **how to write** each kind of test (mocking patterns, AAA struct
 
 These settings are required in `package.json` (jest config) and `test/jest-e2e.json` for the project's tests to work correctly:
 
-- `setupFiles: ["dotenv/config", ".../src/test/test-env.ts"]` — without `dotenv/config`, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS. `test-env.ts` forces the test BullMQ prefix.
+- `setupFiles: ["dotenv/config", ".../src/test/test-env.ts"]` — without `dotenv/config`, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS. `test-env.ts` points the run at the test database, bucket and BullMQ prefix.
 - `maxWorkers: 1` — keeps the suites serial (see "Test execution").
+- `globalSetup` (`src/test/global-setup.ts`) — creates and migrates the test database before any suite runs.
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.

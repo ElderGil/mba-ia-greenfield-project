@@ -11,6 +11,7 @@ import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-Create
 import { CreateVideos1794877024750 } from './migrations/1794877024750-CreateVideos';
 import { DropRedundantVideosChannelIndex1795194064003 } from './migrations/1795194064003-DropRedundantVideosChannelIndex';
 import { createTestDataSource } from '../test/create-test-data-source';
+import { assertTestDatabase } from '../test/test-database';
 
 const MANAGED_TABLES = [
   'videos',
@@ -72,13 +73,12 @@ describe('Database migrations (integration)', () => {
   beforeAll(async () => {
     dataSource = createTestDataSource(
       [User, Channel, RefreshToken, VerificationToken, Video],
-      {
-        synchronize: false,
-        migrations: ALL_MIGRATIONS,
-      },
+      { migrations: ALL_MIGRATIONS },
     );
 
     await dataSource.initialize();
+    // This spec drops the whole schema.
+    await assertTestDatabase(dataSource);
 
     for (const table of MANAGED_TABLES) {
       await dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);

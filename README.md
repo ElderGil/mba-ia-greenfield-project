@@ -225,7 +225,7 @@ docker compose exec -T nestjs-api npm run lint              # ESLint (0 erros, 0
 docker compose exec -T nestjs-api npm run build             # build da API e do worker
 ```
 
-Os testes de integração e E2E do módulo de vídeos executam fluxos reais contra PostgreSQL, Redis, `pgsty/silo` (S3) e geração de MP4 com `ffmpeg`; apenas o envio SMTP (`MailService`) é mockado na suíte E2E. As suítes rodam em série (`maxWorkers: 1` nas duas configs do Jest, porque compartilham o banco) e usam o prefixo BullMQ `streamtube-test`, então o `video-worker` do Compose nunca pega job de teste.
+Os testes de integração e E2E do módulo de vídeos executam fluxos reais contra PostgreSQL, Redis, `pgsty/silo` (S3) e geração de MP4 com `ffmpeg`; apenas o envio SMTP (`MailService`) é mockado na suíte E2E. As suítes nunca tocam os dados de desenvolvimento: rodam no banco `streamtube_test` e no bucket `streamtube-media-test`, que o `globalSetup` do Jest cria e migra com as mesmas migrations do `migration:run` (sem `synchronize`), e no prefixo BullMQ `streamtube-test`, então o `video-worker` do Compose nunca pega job de teste. A limpeza de tabelas recusa qualquer banco cujo nome não termine em `_test`. As suítes rodam em série (`maxWorkers: 1` nas duas configs do Jest, porque compartilham o banco de teste).
 
 ### Frontend (`next-frontend`)
 

@@ -54,7 +54,6 @@ describe('VideoMaintenanceService (integration)', () => {
             password: dbCfg.password,
             database: dbCfg.name,
             entities: [User, Channel, RefreshToken, VerificationToken, Video],
-            synchronize: true,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
