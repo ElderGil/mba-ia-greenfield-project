@@ -319,6 +319,9 @@ describe('Videos (e2e)', () => {
       .set('Range', `bytes=${sampleMp4.length + 100}-`)
       .expect(416);
     expect((invalidRange.body as ErrorBody).error).toBe('INVALID_RANGE');
+    expect(invalidRange.headers['content-range']).toBe(
+      `bytes */${sampleMp4.length}`,
+    );
 
     // 8. Full attachment download (@Public)
     const downloadRes = await request(app.getHttpServer())

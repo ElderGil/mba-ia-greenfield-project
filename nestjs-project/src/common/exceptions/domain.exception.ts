@@ -3,6 +3,8 @@ export abstract class DomainException extends Error {
     public readonly errorCode: string,
     public readonly httpStatus: number,
     message: string,
+    // Extra response headers the HTTP layer must send with the error.
+    public readonly headers?: Readonly<Record<string, string>>,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -110,7 +112,18 @@ export class InvalidUploadPartsException extends DomainException {
 }
 
 export class InvalidRangeException extends DomainException {
-  constructor(message = 'Requested byte range is invalid or unsatisfiable') {
-    super('INVALID_RANGE', 416, message);
+  constructor(
+    totalSize?: number,
+    message = 'Requested byte range is invalid or unsatisfiable',
+  ) {
+    // RFC 9110 §15.5.17: a 416 carries the current length of the resource.
+    super(
+      'INVALID_RANGE',
+      416,
+      message,
+      totalSize !== undefined
+        ? { 'Content-Range': `bytes */${totalSize}` }
+        : undefined,
+    );
   }
 }

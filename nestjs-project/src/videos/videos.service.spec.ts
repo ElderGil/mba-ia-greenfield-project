@@ -69,6 +69,29 @@ describe('VideosService', () => {
       });
     });
 
+    it('treats a suffix longer than the file as the whole file, even beyond 2^53', () => {
+      expect(service.parseByteRange('bytes=-6000', 5000)).toEqual({
+        start: 0,
+        end: 4999,
+      });
+      expect(
+        service.parseByteRange('bytes=-99999999999999999999', 5000),
+      ).toEqual({ start: 0, end: 4999 });
+    });
+
+    it('carries Content-Range: bytes */size on an unsatisfiable range (RFC 9110)', () => {
+      let thrown: unknown;
+      try {
+        service.parseByteRange('bytes=6000-', 5000);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(InvalidRangeException);
+      expect((thrown as InvalidRangeException).headers).toEqual({
+        'Content-Range': 'bytes */5000',
+      });
+    });
+
     it.each([
       ['items=0-10', 5000],
       ['bytes=0-10,20-30', 5000],

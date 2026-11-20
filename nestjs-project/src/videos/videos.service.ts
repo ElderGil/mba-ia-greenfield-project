@@ -100,45 +100,48 @@ export class VideosService {
 
   parseByteRange(rangeHeader: string, totalSize: number): ParsedByteRange {
     if (totalSize <= 0) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const trimmed = rangeHeader.trim();
     if (!trimmed.startsWith('bytes=') || trimmed.includes(',')) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const spec = trimmed.slice('bytes='.length);
     const match = /^(\d*)-(\d*)$/.exec(spec);
     if (!match) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const [, startStr, endStr] = match;
     if (!startStr && !endStr) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     // Suffix-byte-range-spec: bytes=-N (last N bytes)
     if (!startStr && endStr) {
+      // Digits beyond 2^53 still mean "more than the whole file" (RFC 9110).
       const suffixLength = Number(endStr);
-      if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
-        throw new InvalidRangeException();
+      if (suffixLength <= 0) {
+        throw new InvalidRangeException(totalSize);
       }
-      const start = Math.max(0, totalSize - suffixLength);
+      const start = Number.isSafeInteger(suffixLength)
+        ? Math.max(0, totalSize - suffixLength)
+        : 0;
       return { start, end: totalSize - 1 };
     }
 
     const start = Number(startStr);
     if (!Number.isSafeInteger(start) || start < 0 || start >= totalSize) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const end = endStr
       ? Math.min(Number(endStr), totalSize - 1)
       : totalSize - 1;
     if (!Number.isSafeInteger(end) || end < start) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     return { start, end };
