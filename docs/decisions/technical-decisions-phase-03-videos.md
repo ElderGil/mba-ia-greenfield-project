@@ -61,7 +61,7 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: S3 Multipart Upload with Presigned Part URLs (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`)
-- Three-step handshake: (1) client calls `POST /videos/uploads/initiate` → API creates a `draft` video record, calls S3 `CreateMultipartUpload`, and returns `{ videoId, shortCode, uploadId, partSizeBytes }`; (2) client requests presigned `UploadPart` URLs (`POST /videos/:id/uploads/parts`) and `PUT`s chunks (e.g., 5MB–100MB each) directly to MinIO/S3, retrying individual failed parts on network drops; (3) client calls `POST /videos/:id/uploads/complete` with `{ uploadId, parts: [{ partNumber, etag }] }` → API verifies parts/object and enqueues processing. Also supports aborting (`POST /videos/:id/uploads/abort`).
+- Three-step handshake: (1) client calls `POST /videos/uploads/initiate` → API creates a `draft` video record, calls S3 `CreateMultipartUpload`, and returns `{ videoId, shortCode, uploadId, partSizeBytes }`; (2) client requests presigned `UploadPart` URLs (`POST /videos/:id/uploads/parts`) and `PUT`s chunks (e.g., 5MB–100MB each) directly to MinIO/S3, retrying individual failed parts on network drops; (3) client calls `POST /videos/:id/uploads/complete` with `{ parts: [{ partNumber, etag }] }` (_revised 2026-11-20: the API already holds the `uploadId`; the DTO rejects unknown fields, so sending it is a 400_) → API verifies parts/object and enqueues processing. Also supports aborting (`POST /videos/:id/uploads/abort`).
 - **Pros:** Zero video bytes flow through NestJS/Node memory or Express request timeouts; supports up to 5TB (10,000 parts × up to 5GB); natively resumable per part; native S3/MinIO feature requiring no extra upload server.
 - **Cons:** Client must split files into chunks ≥ 5MB (except final part) and collect `ETag` headers; requires MinIO CORS configuration when browser clients upload directly.
 
@@ -96,7 +96,7 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: AWS SDK v3 (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`) with Private Bucket and Prefix Isolation
-- Uses modular AWS SDK v3 (`3.1169.0`) configured with `endpoint`, `region`, `credentials`, and `forcePathStyle: true` (env-driven so MinIO works locally and AWS S3 works in production). Single private bucket (e.g. `streamtube-media`) with deterministic prefixes: `videos/{channelId}/{videoId}/original` (or `.ext`) and `thumbnails/{channelId}/{videoId}/thumb.jpg`.
+- Uses modular AWS SDK v3 (`^3.1170.0`, the version installed since SI-03.1; this line said `3.1169.0`) configured with `endpoint`, `region`, `credentials`, and `forcePathStyle: true` (env-driven so MinIO works locally and AWS S3 works in production). Single private bucket (e.g. `streamtube-media`) with deterministic prefixes: `videos/{channelId}/{videoId}/original` (or `.ext`) and `thumbnails/{channelId}/{videoId}/thumb.jpg`.
 - **Pros:** Standard TypeScript-first modular SDK, works identically with MinIO and AWS S3, private bucket prevents bypassing API status/ownership/visibility checks (critical for `draft` and future `unlisted` videos), single bucket simplifies IAM/Compose bootstrap.
 - **Cons:** Requires `forcePathStyle: true` configuration for MinIO and explicit bucket initialization on Compose startup.
 
@@ -171,7 +171,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (Dedicated `video-worker` Container + Native `ffmpeg`/`ffprobe` via `child_process`)** — Matches the target C4 architecture, avoids deprecated `fluent-ffmpeg`, and keeps API responsiveness isolated from FFmpeg workloads.
 
-**Decision:** A (Dedicated `video-worker` container + native `ffmpeg`/`ffprobe` via `child_process`, extracting `durationSeconds`, `width`, `height`, `codec`, `sizeBytes`, `mimeType`, and JPEG thumbnail at 1s with 0s fallback)
+**Decision:** A (Dedicated `video-worker` container + native `ffmpeg`/`ffprobe` via `child_process`, extracting `durationSeconds`, `width`, `height`, `codec`, and JPEG thumbnail at 1s with 0s fallback; _revised 2026-11-20: `sizeBytes` comes from the API's `HeadObject` and `mimeType` from initiate, the worker extracts neither; the thumbnail seek is `min(1s, duration/2)` with first-frame fallback, and the demuxer is forced from the stored MIME_)
 
 **Libraries:** —
 
