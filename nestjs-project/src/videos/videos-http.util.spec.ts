@@ -118,6 +118,16 @@ describe('videos-http.util', () => {
       expect(header).toContain('filename="evilname.mp4"');
     });
 
+    it('should not let Unicode normalisation put a quote back into the ASCII fallback', () => {
+      // U+FF02 (fullwidth quotation mark) becomes '"' under NFKD.
+      const header = buildContentDisposition('a\uff02b.mp4');
+
+      expect(header).toMatch(/^attachment; filename="a_b\.mp4"; filename\*=/);
+      expect(() =>
+        validateHeaderValue('content-disposition', header),
+      ).not.toThrow();
+    });
+
     it('should fall back to video.mp4 when nothing usable is left', () => {
       expect(buildContentDisposition('"\r\n"')).toContain(
         'filename="video.mp4"',
@@ -126,6 +136,21 @@ describe('videos-http.util', () => {
   });
 
   describe('sendMedia', () => {
+    it('should not open storage for a client that already left', async () => {
+      const res = fakeResponse();
+      res.destroy();
+      const open = jest.fn();
+
+      await sendMedia(
+        { method: 'GET', headers: {} },
+        res,
+        reply(open),
+        jest.fn(),
+      );
+
+      expect(open).not.toHaveBeenCalled();
+    });
+
     it('should answer 304 without opening the source when If-None-Match matches', async () => {
       const res = fakeResponse();
       const open = jest.fn();

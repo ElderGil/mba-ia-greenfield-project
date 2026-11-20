@@ -39,7 +39,8 @@ export function buildContentDisposition(filename: string): string {
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^\x20-\x7e]/gu, '_')
-    .replace(/\\/g, '_');
+    // After NFKD: compatibility forms such as U+FF02 decompose to '"'.
+    .replace(/["\\]/g, '_');
 
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeRfc5987(name)}`;
 }
@@ -117,6 +118,9 @@ export async function sendMedia(
     return;
   }
 
+  // The client may have left before this ran ('close' already emitted).
+  if (res.destroyed) return;
+
   let clientGone = false;
   const markGone = (): void => {
     clientGone = true;
@@ -130,7 +134,7 @@ export async function sendMedia(
     res.off('close', markGone);
   }
 
-  if (clientGone) {
+  if (clientGone || res.destroyed) {
     opened.stream.destroy();
     return;
   }
