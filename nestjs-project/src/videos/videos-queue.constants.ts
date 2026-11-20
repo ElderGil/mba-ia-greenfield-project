@@ -10,6 +10,8 @@ export function processVideoJobId(videoId: string): string {
 export const VIDEO_MAINTENANCE_QUEUE = 'video-maintenance';
 export const VIDEO_MAINTENANCE_SCHEDULER = 'video-maintenance-sweep';
 export const VIDEO_MAINTENANCE_EVERY_MS = 15 * 60_000;
+// Completed/failed sweep jobs kept in Redis (about a day at one per 15 min).
+export const VIDEO_MAINTENANCE_KEEP_JOBS = 100;
 
 export interface VideoProcessingJobData {
   videoId: string;
