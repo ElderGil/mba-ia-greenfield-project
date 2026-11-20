@@ -14,7 +14,9 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from '../src/app.module';
+import { JSON_BODY_LIMIT } from '../src/common/common.constants';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { MailService } from '../src/mail/mail.service';
@@ -77,7 +79,11 @@ describe('Videos (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    const expressApp =
+      moduleFixture.createNestApplication<NestExpressApplication>();
+    // Mirrors main.ts
+    expressApp.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+    app = expressApp;
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -470,6 +476,43 @@ describe('Videos (e2e)', () => {
         .expect(404);
     }
   });
+
+  it('accepts a complete request listing the maximum number of parts and rejects more', async () => {
+    const { accessToken } = await registerConfirmAndLogin('maxparts');
+    const init = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Big',
+        filename: 'big.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 1024,
+      })
+      .expect(201);
+    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+    const parts = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        partNumber: Math.min(i + 1, 10000),
+        etag: '"0123456789abcdef0123456789abcdef"',
+      }));
+
+    // ~550 kB body: must reach the service (storage rejects the fake ETags)
+    // instead of dying in the 100 kB default body parser with 413.
+    const max = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: parts(10000) })
+      .expect(400);
+    expect((max.body as ErrorBody).error).toBe('INVALID_UPLOAD_PARTS');
+
+    const tooMany = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: parts(10001) })
+      .expect(400);
+    expect((tooMany.body as ErrorBody).error).toBe('VALIDATION_ERROR');
+  }, 30000);
 
   it('generates distinct unique shortCodes for multiple videos', async () => {
     const { accessToken } = await registerConfirmAndLogin('multi');
