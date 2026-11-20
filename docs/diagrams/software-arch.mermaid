@@ -17,11 +17,11 @@ C4Container
 
     Rel(anonUser, frontend, "Uses", "HTTPS")
     Rel(authUser, frontend, "Uses", "HTTPS")
-    Rel(frontend, api, "Calls", "REST")
-    Rel(frontend, storage, "Streams", "HTTPS")
+    Rel(frontend, api, "Calls, plays video", "REST / HTTP Range")
+    Rel(frontend, storage, "Uploads parts (presigned PUT)", "HTTPS")
 
     Rel(api, db, "Reads/Writes")
-    Rel(api, storage, "Uploads")
+    Rel(api, storage, "Multipart control, presign, streams 206")
     Rel(api, queue, "Publishes job")
     Rel(api, email, "Sends email", "SMTP")
 
