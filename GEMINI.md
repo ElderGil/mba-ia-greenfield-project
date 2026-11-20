@@ -80,14 +80,31 @@ Every change must be tested. During development, run only the tests related to t
 - Focus on the defined scope for each task to ensure clarity and maintainability of the codebase.
 - If you identify a necessary change that is out of scope, create a new issue or task for it instead of including it in the current work.
 
+## Agent Skill Usage
+
+When working on any task (planning, implementing, debugging, refactoring,
+reviewing, etc.), decompose the request into its underlying subtasks and
+concerns, then identify which available skills match any of them and activate
+those skills. (In Claude Code a `UserPromptSubmit` hook repeats this on every
+prompt; this file is always on in Antigravity, so the instruction lives here.)
+
 ## Antigravity Ported Foundation (`.agents/`)
 
-As skills e regras originais de `.claude/` foram portadas para a convenção do Antigravity:
+A fundação de `.claude/` foi portada para a convenção do Antigravity (docs oficiais: `antigravity.google/docs/rules`, `/skills`, `/subagents`):
 
-- **Skills do workflow e domínio:** `.agents/skills/` (cópia das skills `research`, `plan-context`, `plan-validate`, `plan-resolve`, `plan-build`, `plan-test-specs`, `plan-pipeline`, `implement`, `implement-phase`, `decide`, `nestjs-best-practices`, `typeorm`, `testing-guide-nestjs-project`, etc.).
-- **Regras de código e testes:** `.agents/rules/` (portadas de `.claude/rules/`). Antes de editar arquivos NestJS/TypeORM/testes, ler as regras aplicáveis em `.agents/rules/`.
-- **Servidores MCP:** o `.mcp.json` (Postgres) e o context7 exigido pelo `CLAUDE.md` vão no `mcp_config.json` do Antigravity, que é por usuário e fica fora do repositório (`~/.gemini/antigravity/mcp_config.json`). O equivalente versionado, sem segredos, é `.agents/mcp_config.example.json`: copie as entradas `context7` e `postgres` para o seu `mcp_config.json` e recarregue os MCPs do Antigravity.
-- **Subagents de leitura:** referenciados em `.claude/agents/` (`decisions-reader`, `decisions-detail-reader`, `decisions-correlator`, `phases-reader`, `plan-reader`); quando a ferramenta usar `invoke_subagent` ou leitura direta equivalente, seguir os mesmos contratos de retorno estruturado.
+- **Rules:** `.agents/rules/*.md`, com frontmatter `trigger: glob` + `globs:` (convertido do `paths:` do Claude Code). Uma rule sem `trigger` válido é descartada em silêncio pelo Antigravity; mantenha esse formato ao criar ou editar rules. Elas ativam sozinhas quando o agente mexe em arquivos que casam com os globs.
+- **Skills:** `.agents/skills/<nome>/SKILL.md` (mesmo formato, `description` no frontmatter): `research`, `plan-context`, `plan-validate`, `plan-resolve`, `plan-build`, `plan-test-specs`, `plan-pipeline`, `implement`, `implement-phase`, `decide`, `nestjs-best-practices`, `typeorm`, `testing-guide-nestjs-project`, entre outras.
+- **Sub-agents de leitura:** `.agents/agents/` (`plan-reader`, `phases-reader`, `decisions-reader`, `decisions-detail-reader`, `decisions-correlator`, `inventory-digest-reader`), com `subagent: true`, ferramentas só de leitura e execução de comandos desligada. Os contratos de entrada e saída são os mesmos de `.claude/agents/`.
+- **Servidores MCP:** o `.mcp.json` (Postgres) e o context7 vão no `mcp_config.json` do Antigravity, que é por usuário e fica fora do repositório (`~/.gemini/antigravity/mcp_config.json`). O equivalente versionado, sem segredos, é `.agents/mcp_config.example.json`: copie as entradas `context7` e `postgres` para o seu `mcp_config.json` e recarregue os MCPs. O MCP do Postgres usa `localhost:5432`: um PostgreSQL nativo escutando nessa porta no host responde no lugar do container `db`.
+
+As skills foram escritas para o Claude Code e citam as ferramentas dele. No Antigravity, leia assim:
+
+| Nas skills (Claude Code) | No Antigravity |
+|---|---|
+| `Agent` tool com `subagent_type: <nome>` | `invoke_subagent` com o agente `<nome>` de `.agents/agents/` |
+| `Read` / `Grep` / `Glob` | `view_file` / `grep_search` / `find_by_name` |
+| `Bash` | `run_command` |
+| `CLAUDE.md` | este `GEMINI.md` (atualize os dois juntos: o repositório também é usado com o Claude Code) |
 
 ## Library Documentation Lookup
 

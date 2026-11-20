@@ -220,7 +220,7 @@ Load relevant best-practices skills matching the artifacts this SI builds (e.g.,
 
 **Plain `SI-NN.X` covers two distinct kinds — both execute on main thread without figma plugin.** A plain SI ID (no letter suffix, no dotted sub-number) is emitted by `/plan-build` for either: (a) **backend SIs** — Technical actions reference `### Data Model`, `### API Contracts`, `### Authorization Matrix`, etc. (Decisão #34); (b) **Frontend Runtime SIs** — Technical actions reference `### Frontend Runtime → ####`. Both cases skip the figma-implement-design plugin load by construction — the plugin is only loaded for `Xa` letter-suffix SIs (the SI-Xa branch below). Discriminator at runtime: read the SI's Technical actions to identify which Tech Specs subsection is cited; load best-practices skills accordingly (e.g., `vercel-react-best-practices` for FE Runtime SIs that adopt TanStack Query / React Compiler patterns; `nestjs-best-practices` for backend SIs). **Caveat:** a plain SI that references `### API Contracts` may also be a frontend BFF Route Handler (artifact `app/api/**/route.ts`, citing the API Contracts **BFF tier**), not a backend SI — the rule above (load best-practices matching the artifacts this SI builds) is authoritative over this subsection-based example: load `next-best-practices` / `vercel-react-best-practices` + `testing-guide-next-frontend`, not `nestjs-best-practices`.
 
-**SI-NN.X.0 — Drift audit (precedes every SI-Xa):** load `figma:figma-implement-design` plugin skill. The audit's purpose is to surface DS-component drift to the user via `frontend-drift-report.md` BEFORE SI-Xa applies any DS file edits. The audit RECORDS decisions; it does NOT apply edits. Schema reference: `.claude/skills/plan-build/references/frontend-drift-report-schema.md`.
+**SI-NN.X.0 — Drift audit (precedes every SI-Xa):** load `figma:figma-implement-design` plugin skill. The audit's purpose is to surface DS-component drift to the user via `frontend-drift-report.md` BEFORE SI-Xa applies any DS file edits. The audit RECORDS decisions; it does NOT apply edits. Schema reference: `.agents/skills/plan-build/references/frontend-drift-report-schema.md`.
 
 Sub-steps in order:
 
@@ -243,8 +243,8 @@ The plugin returns design context (structured representation) and a screenshot. 
 
 **Before composing `auto-Edit "<specifics>"` Decisions, consult the project's design-system alias map** (one-time per `/implement` session — memoized, same pattern as library-refs.md):
 
-- `Bash test -f .claude/rules/design-system.md` (typical project path; adjust per project convention).
-- If present: `Grep -n '^## .* Aliases' .claude/rules/design-system.md` to locate the aliases section → bounded-Read it (upper bound: next `^## ` heading or end of file). Parse the table into an in-memory map: `(figma_value, component_path) → code_variant`. Component scope `*` matches all paths.
+- `Bash test -f .agents/rules/design-system.md` (typical project path; adjust per project convention).
+- If present: `Grep -n '^## .* Aliases' .agents/rules/design-system.md` to locate the aliases section → bounded-Read it (upper bound: next `^## ` heading or end of file). Parse the table into an in-memory map: `(figma_value, component_path) → code_variant`. Component scope `*` matches all paths.
 - If absent (no rule file, or no aliases section): alias map is empty; audit proceeds — additive fallback applies.
 
 Apply the discriminator from the schema reference:
@@ -406,7 +406,7 @@ Scope note: `Explore` is for **project-specific** conventions (file naming, fold
 
 Never phrase the prompt as "show me the file" — phrase it as "summarize the pattern / list the signatures / describe the convention". If the summary reveals you actually need the contents of a specific file, do a **targeted Read of just that one file** (using `offset` + `limit` centered on the relevant section, per the Targeted Reads rule below) — or a full-file Read only when you genuinely need to rewrite most of it. Don't pay the cost of having Explore return many full files upfront.
 
-**Subagent inheritance caveat** — like any subagent (see the full rationale in step 4's test-subagent contract), `Explore` does **not** inherit Claude Code's system prompt: CLAUDE.md files and `.claude/rules/*` are invisible to it. For pattern discovery from source files this is usually fine — the code itself is the authoritative source. But if the convention you're asking about is documented **only** in a CLAUDE.md or a rule file (not observable from code), include a pointer to that file in the invocation prompt so `Explore` can Read it.
+**Subagent inheritance caveat** — like any subagent (see the full rationale in step 4's test-subagent contract), `Explore` does **not** inherit Claude Code's system prompt: CLAUDE.md files and `.agents/rules/*` are invisible to it. For pattern discovery from source files this is usually fine — the code itself is the authoritative source. But if the convention you're asking about is documented **only** in a CLAUDE.md or a rule file (not observable from code), include a pointer to that file in the invocation prompt so `Explore` can Read it.
 
 **Targeted Reads** — when you Read a subproject file directly (either after Explore or in any other context), prefer `offset` + `limit` over whole-file reads. Examples:
 - To inspect a class's shape → read the first ~30 lines.

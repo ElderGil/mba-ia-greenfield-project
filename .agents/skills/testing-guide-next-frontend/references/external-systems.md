@@ -15,7 +15,7 @@
 - **No Vitest test may open a real network connection to the upstream host.** `mocks/setup.ts` runs `server.listen({ onUnhandledRequest: "error" })` — any unintercepted fetch fails with `"request unhandled"`. That error is the contract-coverage signal; do not weaken it to `"warn"`/`"bypass"` in Vitest.
 - **`onUnhandledRequest` differs by runtime:** `"error"` in `mocks/setup.ts` (Vitest), **`"bypass"`** in `instrumentation.ts` (E2E, so Next's own internal requests pass through). Never copy `"error"` into `instrumentation.ts`, never copy `"bypass"` into `mocks/setup.ts`.
 - **One handler per `(method, path)` from OpenAPI `paths`.** Per-domain modules: `mocks/handlers/<domain>.ts` (e.g., `auth.ts`), one barrel line in `mocks/handlers/index.ts`, factories in `mocks/factories/<domain>.ts`. Every endpoint a BFF handler hits MUST have a hand-written handler before its integration test can run.
-- **Fixture bodies are typed via `paths`.** Modules under `mocks/` are the documented exception to the "only `contracts.ts` imports `paths`" rule (`.claude/rules/next-frontend-msw-mocks.md`). A stale fixture fails `tsc --noEmit` after `types.gen.ts` regenerates.
+- **Fixture bodies are typed via `paths`.** Modules under `mocks/` are the documented exception to the "only `contracts.ts` imports `paths`" rule (`.agents/rules/next-frontend-msw-mocks.md`). A stale fixture fails `tsc --noEmit` after `types.gen.ts` regenerates.
 - **Compose URLs as `${env.API_URL}/...`.** Never hardcode the upstream host — the handler must match whatever the BFF actually calls in the test runtime.
 - **Per-test deviations via `server.use(...)`** inside `beforeEach`/`it`; `afterEach(() => server.resetHandlers())` (already in `mocks/setup.ts`) prevents leakage.
 

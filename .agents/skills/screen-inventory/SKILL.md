@@ -263,7 +263,7 @@ The parent is the only entity that talks to the user, reads files, writes files,
 
 1. **The Figma target:** `fileKey`, `nodeId` (in MCP form), and the full URL.
 2. **The phase capabilities, quoted verbatim** from the relevant `### Fase NN — …` section of `docs/project-plan.md`. Sub-agents do NOT read project-plan.md themselves — the parent reads it once (during Figma inputs Step 1 on a fresh run, or during preflight on a resume) and passes the relevant slice to every sub-agent it dispatches.
-3. **A pointer to the classification rules:** the sub-agent is instructed to read the sections "How to classify components", "How to derive verbs of intent", and "Output structure" from `.claude/skills/screen-inventory/SKILL.md`. These rules are too long to restate in every prompt and change rarely, so pointing to them keeps the prompt short; only the short extraction-time rules are still restated inline in the template below.
+3. **A pointer to the classification rules:** the sub-agent is instructed to read the sections "How to classify components", "How to derive verbs of intent", and "Output structure" from `.agents/skills/screen-inventory/SKILL.md`. These rules are too long to restate in every prompt and change rarely, so pointing to them keeps the prompt short; only the short extraction-time rules are still restated inline in the template below.
 4. **Already-classified components the sub-agent should reuse**, aggregated by the parent from two sources: (a) screens already appended to the current inventory file — only populated when a new parent resumes a partially-completed run from an existing progress file; (b) components found unchanged in prior-phase inventories under `docs/inventories/` — populated when the parent identified cross-phase reuse candidates while reading that directory in the Context step. Format: `ComponentName → Type, In DS?: ✓/✗[, reuse path][, source: current | phase-NN]`. When building this list, read the corresponding row in the Component inventory table of the existing inventory and extract: Type, In DS?, Reuse?, and any "see screen:" Notes. Do not omit `In DS?` — it is the most critical field for cross-screen consistency. If In DS? is `✗`, keep it `✗` even if Reuse? has a path value (the path is planned, not yet implemented) — **except** when the Cross-phase promotion rule fires (see Context step 4: a form-2 inherited entry whose path is now present in the step-6 filesystem snapshot is overridden to `In DS?: ✓` with the `(new)` suffix stripped).
 5. **The return contract** (see below).
 
@@ -292,7 +292,7 @@ Figma nodeId: [nodeId in MCP form, e.g. 1234:5]
 URL: [full URL]
 
 Your task:
-1. Read .claude/skills/screen-inventory/SKILL.md, sections "How to classify components", "How to derive verbs of intent", and "Output structure" (for the exact screen section format to emit). These are the rules you must follow.
+1. Read .agents/skills/screen-inventory/SKILL.md, sections "How to classify components", "How to derive verbs of intent", and "Output structure" (for the exact screen section format to emit). These are the rules you must follow.
 2. Call mcp__plugin_figma_figma__get_design_context with the fileKey and nodeId above.
 3. Call mcp__plugin_figma_figma__get_screenshot with the same.
 4. List every component in the tree. Classify each as Presentational, Local-interactive, or Server-connected, using evidence from BOTH the Figma output AND the phase capabilities listed below.

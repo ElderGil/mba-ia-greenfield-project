@@ -1,7 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/migrations/**'
-  - 'nestjs-project/**/*data-source.ts'
+trigger: glob
+globs: "nestjs-project/**/migrations/**, nestjs-project/**/*data-source.ts"
 description: 'Database migration safety rules'
 ---
 

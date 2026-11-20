@@ -3,7 +3,7 @@ name: generate-test-guide
 description: >
   Analyzes a project's tech stack, searches the web for testing best practices,
   asks the user clarifying questions, and generates a project-specific testing
-  multi-file skill at `.claude/skills/testing-guide-<project>/` with main SKILL.md and artifact/reference sub-files. Invoke with `/generate-test-guide <project-folder>`.
+  multi-file skill at `.agents/skills/testing-guide-<project>/` with main SKILL.md and artifact/reference sub-files. Invoke with `/generate-test-guide <project-folder>`.
 disable-model-invocation: true
 ---
 
@@ -13,13 +13,13 @@ You are a testing architecture expert. Your job is to analyze a project, researc
 
 **Input:** `$ARGUMENTS` is the path to the project folder (default: current working directory).
 
-**Output:** a multi-file skill at `.claude/skills/testing-guide-<project>/` (e.g., `testing-guide-nestjs-project`) with a main `SKILL.md` (~200-250 lines) and detailed guides in `artifacts/` and `references/` subdirectories. Each project gets its own skill, enabling monorepo support.
+**Output:** a multi-file skill at `.agents/skills/testing-guide-<project>/` (e.g., `testing-guide-nestjs-project`) with a main `SKILL.md` (~200-250 lines) and detailed guides in `artifacts/` and `references/` subdirectories. Each project gets its own skill, enabling monorepo support.
 
 ---
 
 ## Phase 1 — Project Analysis
 
-First, read `.claude/skills/generate-test-guide/testing-fundamentals.md` — this contains universal testing principles that serve as the foundation. Having these loaded early allows you to filter web research results against them in Phase 2.
+First, read `.agents/skills/generate-test-guide/testing-fundamentals.md` — this contains universal testing principles that serve as the foundation. Having these loaded early allows you to filter web research results against them in Phase 2.
 
 Then explore the project at the given path. Collect the following:
 
@@ -69,8 +69,8 @@ Then perform the artifact inventory:
 - Count existing tests to understand current coverage level.
 
 ### 1.6 Existing Test Skills & Rules
-- Check if `.claude/skills/` already has testing-related skills (e.g., `test-guide`).
-- Check if `.claude/rules/` already has testing-related rules.
+- Check if `.agents/skills/` already has testing-related skills (e.g., `test-guide`).
+- Check if `.agents/rules/` already has testing-related rules.
 - Read them to understand what's already documented and avoid contradictions.
 
 Compile all findings into a structured summary (keep it internal — do not output to the user yet).
@@ -127,14 +127,14 @@ The summary must include:
 
 ### 4.1a Compose the main SKILL.md
 
-The skill directory and name are derived from the project folder name: `.claude/skills/testing-guide-<project>/`.
+The skill directory and name are derived from the project folder name: `.agents/skills/testing-guide-<project>/`.
 
-For example, if `$ARGUMENTS` is `nestjs-project`, the output directory is `.claude/skills/testing-guide-nestjs-project/`. This allows multiple project-specific testing guides to coexist in a monorepo.
+For example, if `$ARGUMENTS` is `nestjs-project`, the output directory is `.agents/skills/testing-guide-nestjs-project/`. This allows multiple project-specific testing guides to coexist in a monorepo.
 
 The generated skill uses a **multi-file structure** — the main `SKILL.md` stays compact (~200-250 lines) while detailed guides live in sub-files:
 
 ```
-.claude/skills/testing-guide-<project>/
+.agents/skills/testing-guide-<project>/
 ├── SKILL.md                        (~200-230 lines — core rules + quick reference)
 ├── artifacts/                      (1 file per artifact type)
 │   ├── entities.md
@@ -409,7 +409,7 @@ Before writing the files, verify:
 - [ ] Description focuses on the full development lifecycle (planning features, implementing code, creating/reviewing tests) — does NOT list technologies in the description
 - [ ] Trigger phrases are **project-scoped** and do NOT duplicate triggers from `test-guide` or other existing skills
 - [ ] The generated skill contains NO Writing mode or Audit mode workflow sections
-- [ ] No contradiction with existing skills in `.claude/skills/` or rules in `.claude/rules/`
+- [ ] No contradiction with existing skills in `.agents/skills/` or rules in `.agents/rules/`
 - [ ] **Main SKILL.md is under 250 lines**
 - [ ] **All artifact types are in individual files in `artifacts/`**
 - [ ] **All reference content is in individual files in `references/`**
@@ -438,7 +438,7 @@ Before writing the files, verify:
 
 Write the generated skill as a multi-file structure:
 
-1. Create the skill directory `.claude/skills/testing-guide-<project>/` (if it doesn't already exist)
+1. Create the skill directory `.agents/skills/testing-guide-<project>/` (if it doesn't already exist)
 2. Create the subdirectories `artifacts/` and `references/`
 3. Write the main `SKILL.md`
 4. Write each artifact guide file in `artifacts/`
@@ -452,8 +452,8 @@ Replace `<project>` with the actual project folder name throughout all files.
 
 ## Constraints
 
-- **Do not modify** any existing files in `.claude/skills/` other than the generated `.claude/skills/testing-guide-<project>/` directory.
-- **Do not modify** any existing files in `.claude/rules/`.
+- **Do not modify** any existing files in `.agents/skills/` other than the generated `.agents/skills/testing-guide-<project>/` directory.
+- **Do not modify** any existing files in `.agents/rules/`.
 - **Do not create** test files — this skill only generates the testing skill documents.
 - **Do not skip** any phase — all four phases (analysis, web research, user questions, generation) are mandatory.
 - If `$ARGUMENTS` is empty, use the current working directory as the project path. However, if the current directory contains multiple sub-projects (multiple manifest files like `package.json` at different depths), do not analyze the root automatically — ask the user to specify the target sub-project.
