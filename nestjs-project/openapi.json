@@ -662,6 +662,16 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -841,6 +851,16 @@
           "204": {
             "description": "Upload aborted and draft removed"
           },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -956,6 +976,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VideoOwnerResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -1078,10 +1108,62 @@
         ],
         "responses": {
           "200": {
-            "description": "Full video byte stream"
+            "description": "Full video byte stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "206": {
-            "description": "Partial video byte stream"
+            "description": "Partial video byte stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1129,7 +1211,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Video file download stream"
+            "description": "Video file download stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1167,7 +1275,15 @@
         ],
         "responses": {
           "200": {
-            "description": "JPEG thumbnail image"
+            "description": "JPEG thumbnail image",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1395,7 +1511,8 @@
           },
           "etag": {
             "type": "string",
-            "example": "\"d41d8cd98f00b204e9800998ecf8427e\""
+            "example": "\"d41d8cd98f00b204e9800998ecf8427e\"",
+            "maxLength": 128
           }
         },
         "required": [

@@ -6,7 +6,6 @@ import {
   IsPositive,
   IsString,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { VIDEO_MIME_TYPES } from '../videos.constants';
 
@@ -20,7 +19,6 @@ export class InitiateUploadDto {
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
-  @MinLength(1)
   @MaxLength(255)
   title: string;
 

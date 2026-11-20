@@ -8,6 +8,7 @@ import {
   IsNotEmpty,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -20,9 +21,14 @@ export class UploadPartEtagDto {
   @Max(MAX_MULTIPART_PARTS)
   partNumber: number;
 
-  @ApiProperty({ example: '"d41d8cd98f00b204e9800998ecf8427e"' })
+  // S3 ETags are a quoted MD5, plus "-N" for multipart: well under 128.
+  @ApiProperty({
+    example: '"d41d8cd98f00b204e9800998ecf8427e"',
+    maxLength: 128,
+  })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(128)
   etag: string;
 }
 
