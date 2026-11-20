@@ -161,6 +161,51 @@ describe('VideosUploadService', () => {
       expect(mockVideoRepo.delete).toHaveBeenCalledWith({ id: 'vid-1' });
     });
 
+    describe('when the draft cannot record the multipart upload', () => {
+      const dto = {
+        title: 'Demo',
+        filename: 'demo.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 2048,
+      };
+
+      beforeEach(() => {
+        mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+        mockVideoRepo.save
+          .mockResolvedValueOnce({
+            id: 'vid-1',
+            channel_id: 'chan-1',
+            short_code: 'AbCdEf12345',
+            status: VideoStatus.DRAFT,
+          })
+          .mockRejectedValueOnce(new Error('db down'));
+        mockStorageService.createMultipartUpload.mockResolvedValueOnce('up-1');
+      });
+
+      it('should abort the multipart upload, since nothing else references it', async () => {
+        await expect(service.initiateUpload('u1', dto)).rejects.toThrow(
+          'db down',
+        );
+
+        expect(mockStorageService.abortMultipartUpload).toHaveBeenCalledWith(
+          'videos/chan-1/vid-1/original.mp4',
+          'up-1',
+        );
+        expect(mockVideoRepo.delete).toHaveBeenCalledWith({ id: 'vid-1' });
+      });
+
+      it('should keep the original error when the abort fails too', async () => {
+        mockStorageService.abortMultipartUpload.mockRejectedValueOnce(
+          new Error('S3 down'),
+        );
+
+        await expect(service.initiateUpload('u1', dto)).rejects.toThrow(
+          'db down',
+        );
+        expect(mockVideoRepo.delete).toHaveBeenCalledWith({ id: 'vid-1' });
+      });
+    });
+
     it('creates draft video and initiates S3 multipart upload', async () => {
       mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
       mockVideoRepo.save.mockImplementation((v: Partial<Video>) =>

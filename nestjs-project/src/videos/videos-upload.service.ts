@@ -147,7 +147,7 @@ export class VideosUploadService {
     const ext = MIME_TO_EXTENSION[dto.mimeType] ?? 'mp4';
     const storageKey = `videos/${channel.id}/${video.id}/original.${ext}`;
 
-    let uploadId: string;
+    let uploadId: string | undefined;
     try {
       uploadId = await this.storageService.createMultipartUpload(
         storageKey,
@@ -157,6 +157,9 @@ export class VideosUploadService {
       video.upload_id = uploadId;
       await this.videoRepository.save(video);
     } catch (err) {
+      if (uploadId) {
+        await this.abortUnrecordedUpload(storageKey, uploadId);
+      }
       await this.videoRepository.delete({ id: video.id });
       throw err;
     }
@@ -338,6 +341,21 @@ export class VideosUploadService {
     );
     if (!discarded) {
       throw new VideoInvalidStateException(NOT_A_DRAFT_MESSAGE);
+    }
+  }
+
+  // No row will ever point at this upload, so neither abort nor the sweep
+  // could find it later: abort it now, keeping the caller's original error.
+  private async abortUnrecordedUpload(
+    storageKey: string,
+    uploadId: string,
+  ): Promise<void> {
+    try {
+      await this.storageService.abortMultipartUpload(storageKey, uploadId);
+    } catch (err) {
+      this.logger.warn(
+        `Could not abort unrecorded upload ${uploadId} for ${storageKey}: ${(err as Error).message}`,
+      );
     }
   }
 

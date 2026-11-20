@@ -329,6 +329,48 @@ describe('VideosUploadService (integration)', () => {
     expect(gone).toBeNull();
   });
 
+  it('aborts the multipart upload and removes the draft when the draft cannot record it', async () => {
+    const { user } = await createOwner();
+    let created: { key: string; uploadId: string } | undefined;
+    const createSpy = jest.spyOn(storageService, 'createMultipartUpload');
+    createSpy.mockImplementationOnce(async (key, contentType) => {
+      createSpy.mockRestore();
+      const uploadId = await storageService.createMultipartUpload(
+        key,
+        contentType,
+      );
+      created = { key, uploadId };
+      return uploadId;
+    });
+    // First save creates the draft; the one recording the upload fails.
+    const saveSpy = jest.spyOn(videoRepo, 'save');
+    saveSpy.mockImplementationOnce(async (entity) => {
+      saveSpy.mockImplementationOnce(() =>
+        Promise.reject(new Error('db down')),
+      );
+      return videoRepo.manager.save(Video, entity as Video);
+    });
+
+    try {
+      await expect(
+        uploadService.initiateUpload(user.id, {
+          title: 'Unrecorded',
+          filename: 'unrecorded.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toThrow('db down');
+    } finally {
+      saveSpy.mockRestore();
+    }
+
+    expect(created).toBeDefined();
+    await expect(
+      storageService.listUploadedParts(created!.key, created!.uploadId),
+    ).rejects.toMatchObject({ name: 'NoSuchUpload' });
+    expect(await videoRepo.count()).toBe(0);
+  });
+
   describe('races and ambiguous storage outcomes', () => {
     afterEach(() => {
       jest.restoreAllMocks();
