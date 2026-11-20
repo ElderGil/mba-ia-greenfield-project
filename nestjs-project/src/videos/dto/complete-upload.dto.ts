@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -29,6 +30,7 @@ export class CompleteUploadDto {
   @ApiProperty({ type: [UploadPartEtagDto] })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_MULTIPART_PARTS)
   @ValidateNested({ each: true })
   @Type(() => UploadPartEtagDto)
   parts: UploadPartEtagDto[];

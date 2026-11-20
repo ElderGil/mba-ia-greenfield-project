@@ -1,7 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/src/**/*.ts'
-  - 'nestjs-project/test/**/*.ts'
+trigger: glob
+globs: "nestjs-project/src/**/*.ts, nestjs-project/test/**/*.ts"
 description: 'TypeScript strictness rules — keep tsc --noEmit clean at all times'
 ---
 

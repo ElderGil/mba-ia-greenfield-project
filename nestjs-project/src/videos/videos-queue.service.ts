@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import {
   PROCESS_VIDEO_JOB,
+  processVideoJobId,
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
 } from './videos-queue.constants';
@@ -16,13 +17,13 @@ export class VideosQueueService {
 
   async enqueueProcessVideo(data: VideoProcessingJobData): Promise<string> {
     const job = await this.videoQueue.add(PROCESS_VIDEO_JOB, data, {
-      jobId: `process-video-${data.videoId}`,
+      jobId: processVideoJobId(data.videoId),
       attempts: 3,
       backoff: {
         type: 'exponential',
         delay: 2000,
       },
     });
-    return String(job.id ?? `process-video-${data.videoId}`);
+    return String(job.id ?? processVideoJobId(data.videoId));
   }
 }

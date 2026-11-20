@@ -14,11 +14,11 @@ description: >
 
 This guide helps you decide **what to test**, at **which layer**, and **how to set up tests** for each type of artifact in `next-frontend`. When working on a specific artifact type (page, client component, route handler, hook, utility, …), read the corresponding file in `artifacts/` for the complete recipe. Supporting references (MSW boundary, mock health, file conventions, gotchas) are in `references/`.
 
-The contract is fixed by `next-frontend/CLAUDE.md` § "Testing" and the four `.claude/rules/next-frontend-*.md` rule files:
+The contract is fixed by `next-frontend/CLAUDE.md` § "Testing" and the four `.agents/rules/next-frontend-*.md` rule files:
 
 - **Vitest 4** runs unit + integration tests (`*.test.ts(x)`, `*.integration.test.ts(x)`). Default `environment: "node"`; tests that render JSX opt into jsdom **per-file** with the `// @vitest-environment jsdom` docblock.
 - **Playwright** runs end-to-end tests (`*.e2e-spec.ts` under `tests/`) — see §6 and `references/gotchas.md` for the containerized architecture.
-- **MSW (`msw/node`)** is the **only** fake for the NestJS upstream API. **No** Vitest test may open a real network connection to the upstream host (`.claude/rules/next-frontend-testing.md`).
+- **MSW (`msw/node`)** is the **only** fake for the NestJS upstream API. **No** Vitest test may open a real network connection to the upstream host (`.agents/rules/next-frontend-testing.md`).
 
 > **Tooling status (2026-05):** Vitest + MSW are fully wired — `vitest.config.ts`, `mocks/setup.ts`, `mocks/server.ts`, the per-domain handler barrel, and the `npm test` script all exist and run. **Playwright is not yet installed** (no `@playwright/test`, no `playwright.config.ts`, no `test:e2e` script). E2E recipes below are the binding contract for browser flows; the first phase that needs a browser test triggers the Playwright install — no rule below changes when it lands.
 
@@ -93,7 +93,7 @@ When creating or modifying an artifact, read the corresponding guide for the com
 
 ## 5. Anti-patterns — Do NOT Do This
 
-- ❌ **Open a real network connection to the upstream NestJS API from Vitest** — every fetch a route handler makes must be intercepted by `msw/node`. The rule is absolute (`references/external-systems.md`, `.claude/rules/next-frontend-testing.md`).
+- ❌ **Open a real network connection to the upstream NestJS API from Vitest** — every fetch a route handler makes must be intercepted by `msw/node`. The rule is absolute (`references/external-systems.md`, `.agents/rules/next-frontend-testing.md`).
 - ❌ **Mock `fetch` with `vi.mock`/`vi.fn` in BFF tests** — use MSW. A raw `fetch` stub hides URL/method/header mistakes that `"request unhandled"` would catch (`references/mock-health-rules.md`).
 - ❌ **Try to render an async Server Component in Vitest** — unsupported in React 19/Next 16. Use Playwright (§1, `artifacts/pages.md`, `references/gotchas.md`).
 - ❌ **Mock owned components inside a unit test** — render `<LoginPage>` with the real `<BrandLogo>`/`<AuthFooter>`. The mock boundary is `fetch`, `next/navigation`, side-effect APIs (`references/mock-health-rules.md`).

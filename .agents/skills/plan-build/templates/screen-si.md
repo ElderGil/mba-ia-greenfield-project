@@ -2,7 +2,7 @@
 
 Read by Phase B step B4 when emitting per-screen SIs (one X.0 drift audit + one Xa visual shell + one Xb logic/wiring per screen, with conditional skip of Xb below). Do NOT read this file when `ui_in_scope` is `false` or `deferred`.
 
-**Per-screen SI count is 3 by default** (audit + Xa + Xb), reduced to 2 (audit + Xa) when Decisão #33 conditional skip applies. The audit-SI (`SI-NN.X.0`) is mandatory for every visual shell — its purpose is to surface DS-component drift to the user before SI-Xa applies any DS file edits. The audit-SI emits to `frontend-drift-report.md` (sibling of the plan doc); SI-Xa reads that report and applies decisions mechanically. Schema reference: `.claude/skills/plan-build/references/frontend-drift-report-schema.md`.
+**Per-screen SI count is 3 by default** (audit + Xa + Xb), reduced to 2 (audit + Xa) when Decisão #33 conditional skip applies. The audit-SI (`SI-NN.X.0`) is mandatory for every visual shell — its purpose is to surface DS-component drift to the user before SI-Xa applies any DS file edits. The audit-SI emits to `frontend-drift-report.md` (sibling of the plan doc); SI-Xa reads that report and applies decisions mechanically. Schema reference: `.agents/skills/plan-build/references/frontend-drift-report-schema.md`.
 
 **Conditional skip of SI-Xb (Decisão #33).** Check 4 criteria from the screen's UI Contract:
 
@@ -35,7 +35,7 @@ The audit-SI runs **before** SI-Xa for the same screen. It performs value-level 
    - Server-connected component names (no endpoints/auth/errors): [{names}]
    - Target paths (read-only context for audit; no writes here): `app/{route}/page.tsx` + `components/{feature}/{component}.tsx`
 
-   For each component in the Reused DS list, perform value-level diff against the file on disk and classify per the 4-value status enum (`alinhado` / `drift menor` / `drift relevante` / `componente ausente`). Compose Decision per default policy (see `.claude/skills/plan-build/references/frontend-drift-report-schema.md` § Default decisions per status). Read prior sections of `frontend-drift-report.md` to build `prior_decisions`; populate `Prior` column with CONFLICT detection (executed by `/implement` per its SKILL.md cross-screen consultation algorithm). Write a `## Screen: {slug} — audited at SI-NN.X.0 ({YYYY-MM-DD})` section to `frontend-drift-report.md` (append on first run, overwrite-in-place on re-run). **No code edits — verifiable via `git diff` at SI end.**
+   For each component in the Reused DS list, perform value-level diff against the file on disk and classify per the 4-value status enum (`alinhado` / `drift menor` / `drift relevante` / `componente ausente`). Compose Decision per default policy (see `.agents/skills/plan-build/references/frontend-drift-report-schema.md` § Default decisions per status). Read prior sections of `frontend-drift-report.md` to build `prior_decisions`; populate `Prior` column with CONFLICT detection (executed by `/implement` per its SKILL.md cross-screen consultation algorithm). Write a `## Screen: {slug} — audited at SI-NN.X.0 ({YYYY-MM-DD})` section to `frontend-drift-report.md` (append on first run, overwrite-in-place on re-run). **No code edits — verifiable via `git diff` at SI end.**
 
 **Dependencies:** none _(or: bootstrap SI ids when B2.6 Step 5 wires them)_
 

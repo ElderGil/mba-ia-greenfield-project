@@ -76,7 +76,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
    - `| Missing Capability (cross-slice) | MC-cross-N | Phase capability not covered by any slice's covers_capabilities. Phase mode only, fires only when ≥2 phase-scope docs per NN. Advisory in plan-validate (does not flip status to dirty); hard-error in plan-build on last slice. |`
    - `| Capability Consistency | CC-N | A covers_capabilities entry does not match any bullet in project-plan.md verbatim. Phase mode only (slicing). Hard-error — flips status to dirty. Surfaced early (before cross-slice advisory) to catch typos and stale bullets. |`
 
-**Expected file:** `.claude/skills/plan-pipeline/SKILL.md`
+**Expected file:** `.agents/skills/plan-pipeline/SKILL.md`
 
 **Tests:** n/a (documentation). Validation: grep for residual phrases `"exactly one match"`, `"research/SKILL.md enforces 1:1 cardinality"`, and `"Multiple phase-scope decisions docs"` (abort message); should appear zero times after edit.
 
@@ -109,7 +109,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
    - **Collision with a phase-scope doc of the same NN** (slicing case) → `AskUserQuestion` with two options: (a) edit existing slice; (b) create new slice (user provides distinct slug).
    - **Collision with any other doc** (ad-hoc, or phase-scope of a different NN) → keep the current auto-suffix behavior unchanged. Preserves UX for non-slicing users.
 
-**Expected file:** `.claude/skills/research/SKILL.md`
+**Expected file:** `.agents/skills/research/SKILL.md`
 
 **Tests:** n/a.
 
@@ -133,7 +133,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 5. Update `sources_mtime` recording (Step 6) to include sibling slice `library-refs.md` for every entry in `depends_on_slices`.
 6. Remove the "Multiple phase-scope decisions docs" abort error text from Step 3.
 
-**Expected file:** `.claude/skills/plan-context/SKILL.md`
+**Expected file:** `.agents/skills/plan-context/SKILL.md`
 
 **Tests:** Run `/plan-context auth-frontend` on this repo after all SIs complete; expect `context.md` written under `docs/phases/phase-02-auth-frontend/` inheriting from `auth-backend`.
 
@@ -163,7 +163,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 
 7. **Update IC-N message (line 116)** to expose slicing-aware resolution paths. Current says `"(b) add capability to current scope (edit project-plan.md for phase mode...)"`. Replace phase-mode alternatives with 3 choices when the slice has `covers_capabilities` populated: `"(a) update inventory to remove stale verb via /screen-inventory extension run; (b) claim the capability in this slice's covers_capabilities frontmatter (if the bullet already exists in project-plan.md but another slice owns it — transfer ownership); (c) add new capability to project-plan.md + include in this slice's covers_capabilities."`. For monolithic phases (no `covers_capabilities`), keep the current 2-choice message — the "transfer ownership" branch is slicing-specific.
 
-**Expected file:** `.claude/skills/plan-validate/SKILL.md`
+**Expected file:** `.agents/skills/plan-validate/SKILL.md`
 
 ---
 
@@ -183,7 +183,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 3. Mode detection slug-primary.
 4. **Update Gate 2 abort message (plan-build/SKILL.md:28)** for integer-arg resolution. Current: `"abort on 0 or ≥2"`. New: `"On 0 → 'Run /research phase NN first'. On ≥2 → 'Phase NN has multiple slices: <list>. Pass an explicit slice slug.'"`. Aligns with SI-01 shared rule.
 
-**Expected file:** `.claude/skills/plan-build/SKILL.md`
+**Expected file:** `.agents/skills/plan-build/SKILL.md`
 
 ---
 
@@ -203,7 +203,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 2. Update **`sources_mtime` invariant** (line 255) to note that, when `depends_on_slices` is non-empty on a slice, the slice's `context.md` and `library-refs.md` both record sibling `library-refs.md` mtimes.
 3. Mode detection slug-primary.
 
-**Expected file:** `.claude/skills/plan-resolve/SKILL.md`
+**Expected file:** `.agents/skills/plan-resolve/SKILL.md`
 
 ---
 
@@ -220,7 +220,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 
 **Risk: minimal.** The existing fallback is the slicing path.
 
-**Expected file:** `.claude/skills/implement/SKILL.md`
+**Expected file:** `.agents/skills/implement/SKILL.md`
 
 ---
 
@@ -235,7 +235,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
 3. Inventory file name: `docs/inventories/screen-inventory-phase-NN-{slice-slug}.md` — already correct (the `{slug}` is slice slug post-change).
 4. Abort-fast: if slice has no UI signal in `covers_capabilities`, refuse to run (`"Slice {slug} declares no UI capabilities — use /screen-inventory on a UI-bearing slice or add UI bullets to covers_capabilities"`).
 
-**Expected file:** `.claude/skills/screen-inventory/SKILL.md`
+**Expected file:** `.agents/skills/screen-inventory/SKILL.md`
 
 ---
 
@@ -287,7 +287,7 @@ The goal is to relax the 1:1 rule and allow **N phase-scope docs per `NN`**, eac
      - Filter by `component_name ∉ task_covered_components`.
      - Emit `### Inherited UI Components` with source tagging `from slice {slug}` instead of `from phase-NN`.
 
-**Expected files:** `.claude/agents/phases-reader.md`, `.claude/agents/decisions-reader.md`, `.claude/agents/decisions-detail-reader.md`, `.claude/agents/decisions-correlator.md`, `.claude/agents/inventory-digest-reader.md` (5 agents; plan-reader is the only one unchanged).
+**Expected files:** `.agents/agents/phases-reader.md`, `.agents/agents/decisions-reader.md`, `.agents/agents/decisions-detail-reader.md`, `.agents/agents/decisions-correlator.md`, `.agents/agents/inventory-digest-reader.md` (5 agents; plan-reader is the only one unchanged).
 
 ---
 
@@ -381,8 +381,8 @@ SIs 02 through 08 are parallel-independent after SI-01 lands. SIs 09 agent edits
 
 ## Deliverables
 
-- 8 updated `SKILL.md` files under `.claude/skills/`.
-- 5 updated agent definitions under `.claude/agents/` (phases-reader, decisions-reader, decisions-detail-reader, decisions-correlator, inventory-digest-reader; plan-reader unchanged).
+- 8 updated `SKILL.md` files under `.agents/skills/`.
+- 5 updated agent definitions under `.agents/agents/` (phases-reader, decisions-reader, decisions-detail-reader, decisions-correlator, inventory-digest-reader; plan-reader unchanged).
 - 2 decisions docs annotated with `covers_capabilities` + `depends_on_slices` (user-confirmed split).
 - 1 end-to-end smoke test run producing `docs/phases/phase-02-auth-frontend/{context,validation,phase-02-auth-frontend}.md`.
 - This plan doc remains in-repo as a decision record.

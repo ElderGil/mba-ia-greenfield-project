@@ -21,7 +21,7 @@ If the audit JSON is missing, do NOT improvise edits — instruct the user to ru
 Single Bash invocation. The script does hash check, framework gate, edit planning, edit application, scale-gap analysis, and final report — all of it.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT:-.}/.claude/skills/figma-apply-tokens-tailwind-v4/scripts/apply.py \
+python3 ${CLAUDE_PLUGIN_ROOT:-.}/.agents/skills/figma-apply-tokens-tailwind-v4/scripts/apply.py \
   [--audit docs/figma-audit.json] \
   [--workspace .]
 ```

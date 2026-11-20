@@ -1,18 +1,21 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, type OnApplicationShutdown } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { Repository } from 'typeorm';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
-import { MediaProcessorService } from './media-processor.service';
+import { MediaProcessorService, redactUrls } from './media-processor.service';
 import {
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
 } from './videos-queue.constants';
 
 @Processor(VIDEO_PROCESSING_QUEUE, { concurrency: 2 })
-export class VideoProcessingProcessor extends WorkerHost {
+export class VideoProcessingProcessor
+  extends WorkerHost
+  implements OnApplicationShutdown
+{
   private readonly logger = new Logger(VideoProcessingProcessor.name);
 
   constructor(
@@ -22,6 +25,14 @@ export class VideoProcessingProcessor extends WorkerHost {
     private readonly mediaProcessor: MediaProcessorService,
   ) {
     super();
+  }
+
+  // @nestjs/bullmq closes the worker (waiting for active jobs) on the same
+  // hook; the log makes a graceful stop visible in `docker compose logs`.
+  onApplicationShutdown(signal?: string): void {
+    this.logger.log(
+      `Shutting down (${signal ?? 'close'}); active jobs finish before exit`,
+    );
   }
 
   async process(job: Job<VideoProcessingJobData>): Promise<void> {
@@ -41,10 +52,15 @@ export class VideoProcessingProcessor extends WorkerHost {
       storageKey,
       900,
     );
-    const metadata = await this.mediaProcessor.probeVideo(inputUrl);
+    // The MIME stored at initiate drives the demuxer (see MediaProcessorService).
+    const metadata = await this.mediaProcessor.probeVideo(
+      inputUrl,
+      video.mime_type,
+    );
     const thumbnailBuffer = await this.mediaProcessor.generateThumbnail(
       inputUrl,
       metadata.durationSeconds,
+      video.mime_type,
     );
 
     const thumbnailKey = `thumbnails/${channelId}/${videoId}/thumb.jpg`;
@@ -76,7 +92,12 @@ export class VideoProcessingProcessor extends WorkerHost {
     if (!job) return;
 
     const maxAttempts = job.opts.attempts ?? 1;
-    if (job.attemptsMade < maxAttempts) {
+    // An UnrecoverableError (e.g. a job that stalled more than maxStalledCount)
+    // is final even with attempts left; without this the video stays in
+    // processing forever.
+    const final =
+      job.attemptsMade >= maxAttempts || error instanceof UnrecoverableError;
+    if (!final) {
       this.logger.warn(
         `Job ${job.id} attempt ${job.attemptsMade}/${maxAttempts} failed: ${error.message}`,
       );
@@ -91,7 +112,8 @@ export class VideoProcessingProcessor extends WorkerHost {
       { id: job.data.videoId },
       {
         status: VideoStatus.FAILED,
-        processing_error: error.message.slice(0, 1000),
+        // Defence in depth: no error path may persist a signed URL.
+        processing_error: redactUrls(error.message).slice(0, 1000),
       },
     );
   }

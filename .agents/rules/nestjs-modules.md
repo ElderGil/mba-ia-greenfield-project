@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/src/**/*.module.ts'
+trigger: glob
+globs: "nestjs-project/src/**/*.module.ts"
 description: 'NestJS module structure conventions'
 ---
 

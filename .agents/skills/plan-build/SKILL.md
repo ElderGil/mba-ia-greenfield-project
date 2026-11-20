@@ -159,13 +159,13 @@ After Gate 10 determines the routing branch, Read the corresponding companion fi
 
 | Gate 10 outcome | Read | Then execute |
 |---|---|---|
-| Fresh Phase A (case 1) | `.claude/skills/plan-build/phase-a.md` | Phase A procedure (A1-A5) |
-| Resume Phase B (case 2) | `.claude/skills/plan-build/phase-b.md` | Phase B procedure (B1-B7) |
-| Fresh Phase A (cases 3-4 — partial-artifact recovery) | `.claude/skills/plan-build/phase-a.md` | Phase A procedure (Write overwrites the half-built file) |
-| Append-mode (case 5, default) | `.claude/skills/plan-build/phase-c.md` | Phase C procedure (C1-C7) |
-| Fresh Phase A (case 5 with `--rebuild`) | `.claude/skills/plan-build/phase-a.md` | Phase A procedure as fresh build |
+| Fresh Phase A (case 1) | `.agents/skills/plan-build/phase-a.md` | Phase A procedure (A1-A5) |
+| Resume Phase B (case 2) | `.agents/skills/plan-build/phase-b.md` | Phase B procedure (B1-B7) |
+| Fresh Phase A (cases 3-4 — partial-artifact recovery) | `.agents/skills/plan-build/phase-a.md` | Phase A procedure (Write overwrites the half-built file) |
+| Append-mode (case 5, default) | `.agents/skills/plan-build/phase-c.md` | Phase C procedure (C1-C7) |
+| Fresh Phase A (case 5 with `--rebuild`) | `.agents/skills/plan-build/phase-a.md` | Phase A procedure as fresh build |
 
-**Same-session A→B continuation.** When the user picks "Continue now" at the A5 pause, Read `.claude/skills/plan-build/phase-b.md` before executing B1. The companion file is not auto-loaded by the harness — every cross-file procedure step requires an explicit Read. Phase B's B1 step is a no-op in this same-session continuation path (working memory from Phase A carries over).
+**Same-session A→B continuation.** When the user picks "Continue now" at the A5 pause, Read `.agents/skills/plan-build/phase-b.md` before executing B1. The companion file is not auto-loaded by the harness — every cross-file procedure step requires an explicit Read. Phase B's B1 step is a no-op in this same-session continuation path (working memory from Phase A carries over).
 
 ---
 

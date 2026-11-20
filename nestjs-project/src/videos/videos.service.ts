@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Readable } from 'node:stream';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import {
@@ -8,18 +7,21 @@ import {
   InvalidRangeException,
   VideoAccessDeniedException,
   VideoNotFoundException,
-  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
+import type { OpenedMedia } from './videos-http.util';
 
 export interface ParsedByteRange {
   start: number;
   end: number;
 }
 
+// Storage is opened lazily (open) so HEAD requests and requests rejected
+// before the body never touch the object store.
 export interface VideoStreamPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength: number;
   totalSize: number;
@@ -28,22 +30,24 @@ export interface VideoStreamPayload {
 }
 
 export interface VideoDownloadPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength: number;
   filename: string;
 }
 
 export interface VideoThumbnailPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
+  etag: string;
   contentType: string;
   contentLength?: number;
 }
 
-function sanitizeDownloadFilename(filename: string): string {
-  const base = filename.split(/[/\\]/).pop() ?? 'video.mp4';
-  const cleaned = base.replace(/["\r\n]/g, '').trim();
-  return cleaned.length > 0 ? cleaned : 'video.mp4';
+// A ready video's bytes never change (there is no re-upload), so id + size
+// is a stable strong validator.
+function mediaEtag(video: Video): string {
+  return `"${video.id}-${video.size_bytes}"`;
 }
 
 @Injectable()
@@ -95,8 +99,9 @@ export class VideosService {
       throw new VideoNotFoundException();
     }
 
+    // Public routes must not reveal that an unpublished shortCode exists.
     if (video.status !== VideoStatus.READY || !video.storage_key) {
-      throw new VideoNotReadyException();
+      throw new VideoNotFoundException();
     }
 
     return video;
@@ -104,45 +109,48 @@ export class VideosService {
 
   parseByteRange(rangeHeader: string, totalSize: number): ParsedByteRange {
     if (totalSize <= 0) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const trimmed = rangeHeader.trim();
     if (!trimmed.startsWith('bytes=') || trimmed.includes(',')) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const spec = trimmed.slice('bytes='.length);
     const match = /^(\d*)-(\d*)$/.exec(spec);
     if (!match) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const [, startStr, endStr] = match;
     if (!startStr && !endStr) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     // Suffix-byte-range-spec: bytes=-N (last N bytes)
     if (!startStr && endStr) {
+      // Digits beyond 2^53 still mean "more than the whole file" (RFC 9110).
       const suffixLength = Number(endStr);
-      if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
-        throw new InvalidRangeException();
+      if (suffixLength <= 0) {
+        throw new InvalidRangeException(totalSize);
       }
-      const start = Math.max(0, totalSize - suffixLength);
+      const start = Number.isSafeInteger(suffixLength)
+        ? Math.max(0, totalSize - suffixLength)
+        : 0;
       return { start, end: totalSize - 1 };
     }
 
     const start = Number(startStr);
     if (!Number.isSafeInteger(start) || start < 0 || start >= totalSize) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     const end = endStr
       ? Math.min(Number(endStr), totalSize - 1)
       : totalSize - 1;
     if (!Number.isSafeInteger(end) || end < start) {
-      throw new InvalidRangeException();
+      throw new InvalidRangeException(totalSize);
     }
 
     return { start, end };
@@ -155,15 +163,14 @@ export class VideosService {
     const video = await this.getReadyVideoByShortCode(shortCode);
     const totalSize = Number(video.size_bytes);
 
+    const storageKey = video.storage_key!;
+
     if (rangeHeader) {
       const { start, end } = this.parseByteRange(rangeHeader, totalSize);
       const range = `bytes=${start}-${end}`;
-      const res = await this.storageService.getObjectStream(
-        video.storage_key!,
-        range,
-      );
       return {
-        stream: res.stream,
+        open: () => this.storageService.getObjectStream(storageKey, range),
+        etag: mediaEtag(video),
         contentType: video.mime_type,
         contentLength: end - start + 1,
         totalSize,
@@ -172,11 +179,11 @@ export class VideosService {
       };
     }
 
-    const res = await this.storageService.getObjectStream(video.storage_key!);
     return {
-      stream: res.stream,
+      open: () => this.storageService.getObjectStream(storageKey),
+      etag: mediaEtag(video),
       contentType: video.mime_type,
-      contentLength: res.contentLength ?? totalSize,
+      contentLength: totalSize,
       totalSize,
       isPartial: false,
     };
@@ -184,27 +191,28 @@ export class VideosService {
 
   async getVideoDownload(shortCode: string): Promise<VideoDownloadPayload> {
     const video = await this.getReadyVideoByShortCode(shortCode);
-    const res = await this.storageService.getObjectStream(video.storage_key!);
+    const storageKey = video.storage_key!;
 
     return {
-      stream: res.stream,
+      open: () => this.storageService.getObjectStream(storageKey),
+      etag: mediaEtag(video),
       contentType: video.mime_type,
-      contentLength: res.contentLength ?? Number(video.size_bytes),
-      filename: sanitizeDownloadFilename(video.original_filename),
+      contentLength: Number(video.size_bytes),
+      filename: video.original_filename,
     };
   }
 
   async getThumbnailStream(shortCode: string): Promise<VideoThumbnailPayload> {
     const video = await this.getReadyVideoByShortCode(shortCode);
     if (!video.thumbnail_key) {
-      throw new VideoNotReadyException();
+      throw new VideoNotFoundException();
     }
 
-    const res = await this.storageService.getObjectStream(video.thumbnail_key);
+    const thumbnailKey = video.thumbnail_key;
     return {
-      stream: res.stream,
-      contentType: res.contentType ?? 'image/jpeg',
-      contentLength: res.contentLength,
+      open: () => this.storageService.getObjectStream(thumbnailKey),
+      etag: `"${video.id}-thumb"`,
+      contentType: 'image/jpeg',
     };
   }
 }

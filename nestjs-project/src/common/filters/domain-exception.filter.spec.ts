@@ -6,6 +6,7 @@ import {
   InvalidCredentialsException,
   InvalidTokenException,
   TokenExpiredException,
+  InvalidRangeException,
   TokenReuseDetectedException,
 } from '../exceptions/domain.exception';
 
@@ -13,16 +14,18 @@ describe('DomainExceptionFilter', () => {
   let filter: DomainExceptionFilter;
   let mockJson: jest.Mock;
   let mockStatus: jest.Mock;
+  let mockSetHeader: jest.Mock;
   let mockHost: ArgumentsHost;
 
   beforeEach(() => {
     filter = new DomainExceptionFilter();
     mockJson = jest.fn();
     mockStatus = jest.fn().mockReturnValue({ json: mockJson });
+    mockSetHeader = jest.fn();
 
     mockHost = {
       switchToHttp: () => ({
-        getResponse: () => ({ status: mockStatus }),
+        getResponse: () => ({ status: mockStatus, setHeader: mockSetHeader }),
         getRequest: () => ({ url: '/test', method: 'POST' }),
       }),
       getArgs: () => [],
@@ -31,6 +34,19 @@ describe('DomainExceptionFilter', () => {
       switchToWs: () => ({}),
       getType: () => 'http',
     } as unknown as ArgumentsHost;
+  });
+
+  it('writes the headers carried by the exception before the envelope', () => {
+    filter.catch(new InvalidRangeException(5000), mockHost);
+
+    expect(mockSetHeader).toHaveBeenCalledWith('Content-Range', 'bytes */5000');
+    expect(mockStatus).toHaveBeenCalledWith(416);
+  });
+
+  it('does not write extra headers for exceptions without them', () => {
+    filter.catch(new EmailAlreadyExistsException(), mockHost);
+
+    expect(mockSetHeader).not.toHaveBeenCalled();
   });
 
   it('maps EmailAlreadyExistsException to 409 with EMAIL_ALREADY_EXISTS', () => {

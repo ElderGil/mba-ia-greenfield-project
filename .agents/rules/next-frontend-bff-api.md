@@ -1,7 +1,6 @@
 ---
-paths:
-  - 'next-frontend/app/api/**/route.ts'
-  - 'next-frontend/lib/api/**/*.ts'
+trigger: glob
+globs: "next-frontend/app/api/**/route.ts, next-frontend/lib/api/**/*.ts"
 description: 'BFF Route Handlers and the typed upstream client — OpenAPI-anchored wire-shape pipeline'
 ---
 

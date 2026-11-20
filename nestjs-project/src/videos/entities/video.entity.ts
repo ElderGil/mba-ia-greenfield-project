@@ -23,7 +23,7 @@ export class Video {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
+  // Lookups by channel use the (channel_id, status) index (leftmost prefix).
   @Column({ type: 'uuid' })
   channel_id: string;
 

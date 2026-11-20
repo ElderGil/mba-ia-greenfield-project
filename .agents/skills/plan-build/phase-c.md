@@ -1,10 +1,10 @@
 # Plan Pipeline — Stage 4: Build → Phase C (Append-mode)
 
-This file is loaded by `.claude/skills/plan-build/SKILL.md` after Gate 10 dispatches Append-mode (Rerun semantics case 5: fully-completed artifact, no sentinelas, no `--rebuild` flag). Read SKILL.md for preflight gates, dispatcher rules, hard rules (including the **append-mode-specific Hard rules** under the same heading), output contract, and rerun semantics — they apply to every phase.
+This file is loaded by `.agents/skills/plan-build/SKILL.md` after Gate 10 dispatches Append-mode (Rerun semantics case 5: fully-completed artifact, no sentinelas, no `--rebuild` flag). Read SKILL.md for preflight gates, dispatcher rules, hard rules (including the **append-mode-specific Hard rules** under the same heading), output contract, and rerun semantics — they apply to every phase.
 
 Append-mode propagates **deltas** — Revisions blocks and supersede markers added to decisions docs since the last build — into the existing plan artifact without renumbering or destroying executed SIs.
 
-Append-mode reads `progress.md` (to classify each delta against per-SI status) and may write to it (C6 adds rows for newly-appended SIs). The schema is owned by `.claude/skills/implement/SKILL.md` § "Progress file → Format" — `/implement` is the **initial writer** (creates `progress.md` on first SI executed). `/plan-build` Phase C is a documented secondary writer, restricted to appending new-SI rows in C6. Per-SI `Status:` is `completed | pending` (the file-level `Status:` field that takes `in_progress | completed` is NOT a per-SI value). If `/implement` ever changes that schema, the parsing logic in C2 / C6 below must be updated to match.
+Append-mode reads `progress.md` (to classify each delta against per-SI status) and may write to it (C6 adds rows for newly-appended SIs). The schema is owned by `.agents/skills/implement/SKILL.md` § "Progress file → Format" — `/implement` is the **initial writer** (creates `progress.md` on first SI executed). `/plan-build` Phase C is a documented secondary writer, restricted to appending new-SI rows in C6. Per-SI `Status:` is `completed | pending` (the file-level `Status:` field that takes `in_progress | completed` is NOT a per-SI value). If `/implement` ever changes that schema, the parsing logic in C2 / C6 below must be updated to match.
 
 ## When append-mode runs
 

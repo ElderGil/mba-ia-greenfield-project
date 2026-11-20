@@ -33,7 +33,7 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
-- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe
+- `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe; also runs the maintenance sweep. Runs `node` directly (no `npm run`) so `docker compose stop` delivers SIGTERM to Nest
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
 - `mailpit` — Mailpit SMTP `1025`, Web UI `8025`
 - `minio` — S3-compatible object storage (`pgsty/silo`), API port `9000`, Console port `9001`
@@ -72,7 +72,7 @@ npm run start:worker                     # Run compiled BullMQ FFmpeg video work
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm run test:e2e                         # End-to-end tests (serial: maxWorkers 1)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -90,14 +90,16 @@ curl http://localhost:3000
 
 ### Test execution
 
-Integration and e2e suites share a single test database. They **must** be run with `--runInBand`:
+Integration and e2e suites share a single test database, so they must run serially. Both Jest configs set `maxWorkers: 1`, so the plain commands are already serial (`--runInBand` is equivalent):
 
 ```bash
-docker compose exec nestjs-api npm test -- --runInBand
-docker compose exec nestjs-api npm run test:e2e   # already configured
+docker compose exec nestjs-api npm test
+docker compose exec nestjs-api npm run test:e2e
 ```
 
-Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently.
+Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently (reproduced with `--maxWorkers=4`: 8 unit/integration and 5 e2e failures).
+
+The video suites need the `minio`, `redis` and `video-worker`-image tooling (`ffmpeg`/`ffprobe`, installed by `Dockerfile.dev`) in addition to `db`. They use the BullMQ prefix `streamtube-test` (forced by `src/test/test-env.ts`), so the compose `video-worker` never picks up test jobs and `queue.obliterate()` in the suites never touches real ones.
 
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
@@ -125,7 +127,8 @@ Conventions for **how to write** each kind of test (mocking patterns, AAA struct
 
 These settings are required in `package.json` (jest config) and `test/jest-e2e.json` for the project's tests to work correctly:
 
-- `setupFiles: ["dotenv/config"]` — without this, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS.
+- `setupFiles: ["dotenv/config", ".../src/test/test-env.ts"]` — without `dotenv/config`, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS. `test-env.ts` forces the test BullMQ prefix.
+- `maxWorkers: 1` — keeps the suites serial (see "Test execution").
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.
@@ -152,10 +155,46 @@ Whenever possible, prefer storing only the bare address in `.env` and composing 
 
 NestJS with standard module structure. Source lives in `src/`, compiled output in `dist/`.
 
-- Each domain feature gets its own module (`AuthModule`, `UsersModule`, `ChannelsModule`, `MailModule`, `StorageModule`, `VideosModule`) registered in `AppModule`
-- `WorkerModule` (`src/worker.main.ts`) runs the standalone BullMQ consumer (`VideoProcessingProcessor` + `MediaProcessorService` using `ffmpeg`/`ffprobe`) in the `video-worker` container
+- Each domain feature gets its own module (`AuthModule`, `UsersModule`, `ChannelsModule`, `MailModule`, `StorageModule`, `VideosModule`). `AppModule` imports `AuthModule` (which brings `UsersModule` → `ChannelsModule`, and `MailModule`) and `VideosModule` (which brings `ChannelsModule` and `StorageModule`), plus the root `TypeOrmModule`, `BullModule` and `ConfigModule`
+- `WorkerModule` (`src/worker.main.ts`) runs the standalone BullMQ consumers in the `video-worker` container: `VideoProcessingProcessor` + `MediaProcessorService` (`ffmpeg`/`ffprobe`) and `VideoMaintenanceProcessor` + `VideoMaintenanceService` (sweep)
 - `StorageModule` (`S3StorageService`) wraps `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` for MinIO/S3 multipart uploads, presigned URLs, and byte-range streaming
 - Controllers handle HTTP routing (`VideosController`, `AuthController`); Services hold business logic; both are scoped to their module
+
+## Videos (Phase 03)
+
+Module `src/videos/` (+ `src/storage/`, worker in `src/worker.module.ts`). Decisions: `docs/decisions/technical-decisions-phase-03-videos.md`; plan and progress: `docs/phases/phase-03-videos/`.
+
+### Endpoints (`VideosController`, `/videos`)
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `POST /videos/uploads/initiate` | JWT, throttled 10/min | Creates the `draft` row (unique 11-char `shortCode`) and the S3 multipart upload. `409 TOO_MANY_OPEN_UPLOADS` past `VIDEO_MAX_OPEN_DRAFTS` |
+| `POST /videos/:id/uploads/parts` | owner, draft | Presigned `PUT` URL for one part (the client uploads straight to storage) |
+| `GET /videos/:id/uploads/parts` | owner, draft | Parts already stored, with ETags, to resume an upload |
+| `POST /videos/:id/uploads/complete` | owner, draft | `202`: claims draft → processing (conditional UPDATE, loser gets `409`), completes S3, checks size, enqueues the job |
+| `POST /videos/:id/uploads/abort` | owner, draft | `204`: aborts the multipart upload and deletes the draft |
+| `GET /videos/me` | JWT | Videos of the caller's channel, any status |
+| `GET /videos/:id/status` | owner | Status, extracted metadata, `processingError`, `thumbnailUrl` |
+| `GET /videos/:shortCode` | public | Metadata + stream/download/thumbnail URLs |
+| `GET /videos/:shortCode/stream` | public | `200`, or `206` with `Range`; `416` carries `Content-Range: bytes */size` |
+| `GET /videos/:shortCode/download` | public | Full file, RFC 6266 `Content-Disposition` (ASCII `filename` + UTF-8 `filename*`) |
+| `GET /videos/:shortCode/thumbnail` | public | JPEG thumbnail |
+
+Public routes answer `404 VIDEO_NOT_FOUND` for anything not `ready`, so a shortCode never reveals an unpublished video. Media routes answer `HEAD` without opening storage, send a strong `ETag` + `Cache-Control: no-cache` and answer `304` to `If-None-Match`. All media bodies go through `sendMedia()` (`videos-http.util.ts`): storage is opened lazily, destroyed if the client leaves, and piped with `pipeline()`.
+
+### Lifecycle and processing
+
+- Status: `draft` → `processing` → `ready` | `failed` (`VideoStatus`, Postgres enum). A rejected part list returns the row to `draft`; after S3 closes the multipart upload, any failure (HeadObject, oversize, enqueue) ends in `failed` with `processing_error`.
+- Queue: BullMQ `video-processing`, job `process-video`, id `process-video-{videoId}` (`processVideoJobId`), 3 attempts, exponential backoff. An `UnrecoverableError` (e.g. a stalled job) is final even with attempts left.
+- Worker: ffprobe/ffmpeg read the original through a presigned GET; the demuxer is forced from the stored MIME (`mov` for mp4/quicktime, `matroska` for webm/mkv) with a protocol whitelist, so images and disguised playlists are rejected and no URL inside the file is fetched. Tool errors are stored as `"<tool> failed: <stderr>"` with every URL redacted.
+- Maintenance sweep (BullMQ scheduler `video-maintenance-sweep`, every 15 min): aborts and deletes drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) and fails `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job.
+
+### Storage and limits
+
+- Bucket `streamtube-media` (private): `videos/{channelId}/{videoId}/original.{ext}`, `thumbnails/{channelId}/{videoId}/thumb.jpg`. Keys are built only from UUIDs and the MIME allowlist.
+- MIME allowlist: `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`. Max 10 GiB (`VIDEO_MAX_SIZE_BYTES`), part size 10 MiB (`VIDEO_UPLOAD_PART_SIZE_BYTES`, ≥ 5 MiB), up to 10 000 parts (JSON body limit 1 MB in `main.ts`), presigned URLs valid `VIDEO_PRESIGNED_URL_EXPIRES_IN` (900 s).
+- `S3_PUBLIC_ENDPOINT`: host used in presigned part URLs. Leave empty for the test suites; set `http://localhost:9000` only to upload from the host. The presign client signs no checksum (`requestChecksumCalculation: WHEN_REQUIRED`), which real S3 needs.
+- Other env: `S3_*` (endpoint, region, bucket, credentials, path style), `REDIS_*`, `QUEUE_PREFIX` (default `bull`). See `.env.example`.
 
 ## Code Conventions
 

@@ -1,7 +1,6 @@
 ---
-paths:
-  - 'next-frontend/**/*.ts'
-  - 'next-frontend/**/*.tsx'
+trigger: glob
+globs: "next-frontend/**/*.ts, next-frontend/**/*.tsx"
 description: 'TypeScript strict, imports, RSC/client boundary, file naming, cn(), Next.js primitives, env access'
 ---
 

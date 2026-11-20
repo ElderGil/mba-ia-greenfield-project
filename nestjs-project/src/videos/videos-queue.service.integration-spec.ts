@@ -2,7 +2,7 @@ import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Queue } from 'bullmq';
-import queueConfig from '../config/queue.config';
+import queueConfig, { bullRootOptions } from '../config/queue.config';
 import { VIDEO_PROCESSING_QUEUE } from './videos-queue.constants';
 import { VideosQueueService } from './videos-queue.service';
 
@@ -20,13 +20,8 @@ describe('VideosQueueService (integration)', () => {
         }),
         BullModule.forRootAsync({
           inject: [queueConfig.KEY],
-          useFactory: (cfg: ConfigType<typeof queueConfig>) => ({
-            connection: {
-              host: cfg.redisHost,
-              port: cfg.redisPort,
-              password: cfg.redisPassword,
-            },
-          }),
+          useFactory: (cfg: ConfigType<typeof queueConfig>) =>
+            bullRootOptions(cfg),
         }),
         BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
       ],
@@ -41,6 +36,26 @@ describe('VideosQueueService (integration)', () => {
   afterAll(async () => {
     await queue.obliterate({ force: true });
     await moduleRef.close();
+  });
+
+  it('keeps test jobs under their own prefix, invisible to the real worker', async () => {
+    const jobId = await queueService.enqueueProcessVideo({
+      videoId: `isolation-${Date.now()}`,
+      channelId: 'chan-1',
+      storageKey: 'videos/chan-1/isolation/original.mp4',
+      mimeType: 'video/mp4',
+    });
+    expect(queue.opts.prefix).toBe('streamtube-test');
+
+    // The queue the compose video-worker consumes (default prefix).
+    const realQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
+      connection: queue.opts.connection,
+    });
+    try {
+      expect(await realQueue.getJob(jobId)).toBeUndefined();
+    } finally {
+      await realQueue.close();
+    }
   });
 
   it('persists a process-video job in Redis via BullMQ', async () => {

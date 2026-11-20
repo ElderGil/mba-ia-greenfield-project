@@ -1,12 +1,6 @@
 ---
-paths:
-  - 'next-frontend/**/__tests__/**'
-  - 'next-frontend/tests/**'
-  - 'next-frontend/**/*.test.ts'
-  - 'next-frontend/**/*.test.tsx'
-  - 'next-frontend/**/*.integration.test.ts'
-  - 'next-frontend/**/*.integration.test.tsx'
-  - 'next-frontend/**/*.e2e-spec.ts'
+trigger: glob
+globs: "next-frontend/**/__tests__/**, next-frontend/tests/**, next-frontend/**/*.test.ts, next-frontend/**/*.test.tsx, next-frontend/**/*.integration.test.ts, next-frontend/**/*.integration.test.tsx, next-frontend/**/*.e2e-spec.ts"
 description: 'Test type routing, file placement, forbidden patterns (no real-network Vitest tests)'
 ---
 

@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
 import { MediaProcessorService } from './media-processor.service';
@@ -52,7 +52,10 @@ describe('VideoProcessingProcessor', () => {
   } as unknown as Job<VideoProcessingJobData>;
 
   it('probes video, uploads thumbnail, and marks video ready', async () => {
-    mockVideoRepo.findOne.mockResolvedValue({ id: 'v1' });
+    mockVideoRepo.findOne.mockResolvedValue({
+      id: 'v1',
+      mime_type: 'video/webm',
+    });
     mockStorageService.getPresignedGetUrl.mockResolvedValue(
       'http://minio:9000/signed',
     );
@@ -67,6 +70,16 @@ describe('VideoProcessingProcessor', () => {
 
     await processor.process(job);
 
+    // The stored MIME (not auto-detection) drives the demuxer.
+    expect(mockMediaProcessor.probeVideo).toHaveBeenCalledWith(
+      'http://minio:9000/signed',
+      'video/webm',
+    );
+    expect(mockMediaProcessor.generateThumbnail).toHaveBeenCalledWith(
+      'http://minio:9000/signed',
+      12.5,
+      'video/webm',
+    );
     expect(mockStorageService.putObject).toHaveBeenCalledWith(
       'thumbnails/c1/v1/thumb.jpg',
       thumb,
@@ -98,6 +111,44 @@ describe('VideoProcessingProcessor', () => {
   it('does not mark failed while retry attempts remain', async () => {
     await processor.onFailed(job, new Error('transient error'));
     expect(mockVideoRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('marks video failed when BullMQ fails the job for good before attempts run out (stalled job)', async () => {
+    // BullMQ moves a job that stalled more than maxStalledCount straight to
+    // failed with an UnrecoverableError, whatever attemptsMade says.
+    await processor.onFailed(
+      job,
+      new UnrecoverableError('job stalled more than allowable limit'),
+    );
+
+    expect(mockVideoRepo.update).toHaveBeenCalledWith(
+      { id: 'v1' },
+      {
+        status: VideoStatus.FAILED,
+        processing_error: 'job stalled more than allowable limit',
+      },
+    );
+  });
+
+  it('never persists URLs from an error message in processing_error', async () => {
+    const exhaustedJob = {
+      ...job,
+      attemptsMade: 3,
+      opts: { attempts: 3 },
+    } as unknown as Job<VideoProcessingJobData>;
+
+    await processor.onFailed(
+      exhaustedJob,
+      new Error(
+        'Command failed: ffprobe http://minio:9000/streamtube-media/x.mp4?X-Amz-Signature=abc',
+      ),
+    );
+
+    const [, fields] = mockVideoRepo.update.mock.calls[0] as [
+      unknown,
+      { processing_error: string },
+    ];
+    expect(fields.processing_error).toBe('Command failed: ffprobe <url>');
   });
 
   it('marks video failed once max attempts are exhausted', async () => {

@@ -5,6 +5,7 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   InvalidUploadPartsException,
+  TooManyOpenUploadsException,
   UnsupportedMediaTypeException,
   UploadLimitExceededException,
   VideoAccessDeniedException,
@@ -26,6 +27,7 @@ describe('VideosUploadService', () => {
     findOne: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+    count: jest.fn().mockResolvedValue(0),
   };
 
   const mockChannelsService = {
@@ -49,10 +51,12 @@ describe('VideosUploadService', () => {
     maxFileSizeBytes: 10 * 1024 * 1024 * 1024,
     defaultPartSizeBytes: 10 * 1024 * 1024,
     presignedUrlExpiresInSeconds: 900,
+    maxOpenDrafts: 5,
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockVideoRepo.count.mockResolvedValue(0);
     const module = await Test.createTestingModule({
       providers: [
         VideosUploadService,
@@ -68,6 +72,24 @@ describe('VideosUploadService', () => {
   });
 
   describe('initiateUpload', () => {
+    it('should refuse a new upload once the channel has maxOpenDrafts open drafts, before touching S3', async () => {
+      mockChannelsService.findByUserId.mockResolvedValue({ id: 'chan-1' });
+      mockVideoRepo.count.mockResolvedValue(5);
+
+      await expect(
+        service.initiateUpload('u1', {
+          title: 'One too many',
+          filename: 'a.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toThrow(TooManyOpenUploadsException);
+      expect(mockVideoRepo.count).toHaveBeenCalledWith({
+        where: { channel_id: 'chan-1', status: VideoStatus.DRAFT },
+      });
+      expect(mockStorageService.createMultipartUpload).not.toHaveBeenCalled();
+    });
+
     it('rejects unsupported MIME types with UnsupportedMediaTypeException', async () => {
       await expect(
         service.initiateUpload('u1', {

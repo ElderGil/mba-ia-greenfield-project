@@ -118,3 +118,97 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS — UPLOAD MULTIPART, PROCESSAMENTO E ENTREGA
+# ─────────────────────────────────────────────
+# Requer login (passo 4). Para o PUT direto no storage a partir do host,
+# defina S3_PUBLIC_ENDPOINT=http://localhost:9000 no .env (ver README).
+# Arquivo de exemplo: ffmpeg -f lavfi -i testsrc=duration=3:size=320x240:rate=10 \
+#   -c:v libx264 -pix_fmt yuv420p sample.mp4   (na pasta nestjs-project)
+
+@videoId = {{initiate.response.body.$.videoId}}
+@shortCode = {{initiate.response.body.$.shortCode}}
+@partUrl = {{signPart.response.body.$.presignedUrl}}
+@partEtag = {{putPart.response.headers.ETag}}
+
+### 10. Iniciar upload — cria o draft e o multipart upload no S3
+# Ajuste sizeBytes para o tamanho real do arquivo (até 10 GiB)
+# @name initiate
+POST {{baseUrl}}/videos/uploads/initiate
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "title": "Meu primeiro vídeo",
+  "filename": "sample.mp4",
+  "mimeType": "video/mp4",
+  "sizeBytes": 20000
+}
+
+
+### 11. Assinar a parte 1 — URL pré-assinada de UploadPart
+# @name signPart
+POST {{baseUrl}}/videos/{{videoId}}/uploads/parts
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "partNumber": 1
+}
+
+
+### 12. Enviar a parte direto para o storage (não passa pela API)
+# @name putPart
+PUT {{partUrl}}
+
+< ./sample.mp4
+
+
+### 13. Listar as partes já enviadas (retomar após perder os ETags)
+GET {{baseUrl}}/videos/{{videoId}}/uploads/parts
+Authorization: Bearer {{accessToken}}
+
+
+### 14. Concluir o upload — 202, vídeo vai para processing e o job entra na fila
+POST {{baseUrl}}/videos/{{videoId}}/uploads/complete
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "parts": [{ "partNumber": 1, "etag": {{partEtag}} }]
+}
+
+
+### 15. Abortar um upload em andamento (somente draft)
+POST {{baseUrl}}/videos/{{videoId}}/uploads/abort
+Authorization: Bearer {{accessToken}}
+
+
+### 16. Acompanhar o processamento (draft → processing → ready | failed)
+GET {{baseUrl}}/videos/{{videoId}}/status
+Authorization: Bearer {{accessToken}}
+
+
+### 17. Vídeos do meu canal
+GET {{baseUrl}}/videos/me
+Authorization: Bearer {{accessToken}}
+
+
+### 18. Metadados públicos (404 enquanto não estiver ready)
+GET {{baseUrl}}/videos/{{shortCode}}
+
+
+### 19. Streaming com Range — 206 Partial Content
+GET {{baseUrl}}/videos/{{shortCode}}/stream
+Range: bytes=0-1023
+
+
+### 20. Download completo (Content-Disposition: attachment)
+GET {{baseUrl}}/videos/{{shortCode}}/download
+
+
+### 21. Thumbnail JPEG gerada pelo worker
+GET {{baseUrl}}/videos/{{shortCode}}/thumbnail

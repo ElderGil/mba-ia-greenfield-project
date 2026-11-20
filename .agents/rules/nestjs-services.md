@@ -1,6 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/*.service.ts'
+trigger: glob
+globs: "nestjs-project/**/*.service.ts"
 description: 'Service layer error handling — errors must always propagate to upper layers'
 ---
 

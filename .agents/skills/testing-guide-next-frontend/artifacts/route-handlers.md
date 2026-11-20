@@ -74,7 +74,7 @@ describe("POST /api/auth/login", () => {
 });
 ```
 
-For handlers with route params, build a `NextRequest` and pass the `{ params }` context object the handler expects (see `.claude/rules/next-frontend-bff-api.md` for the param signature).
+For handlers with route params, build a `NextRequest` and pass the `{ params }` context object the handler expects (see `.agents/rules/next-frontend-bff-api.md` for the param signature).
 
 ## When to skip
 

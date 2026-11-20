@@ -10,7 +10,7 @@ import appConfig from './config/app.config';
 import authConfig from './config/auth.config';
 import databaseConfig from './config/database.config';
 import mailConfig from './config/mail.config';
-import queueConfig from './config/queue.config';
+import queueConfig, { bullRootOptions } from './config/queue.config';
 import storageConfig from './config/storage.config';
 import swaggerConfig from './config/swagger.config';
 import videoConfig from './config/video.config';
@@ -50,11 +50,7 @@ import { envValidationSchema } from './config/env.validation';
     BullModule.forRootAsync({
       inject: [queueConfig.KEY],
       useFactory: (qConfig: ConfigType<typeof queueConfig>) => ({
-        connection: {
-          host: qConfig.redisHost,
-          port: qConfig.redisPort,
-          password: qConfig.redisPassword,
-        },
+        ...bullRootOptions(qConfig),
         defaultJobOptions: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },

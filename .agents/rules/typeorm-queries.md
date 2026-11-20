@@ -1,7 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/src/**/*.service.ts'
-  - 'nestjs-project/src/**/*.repository.ts'
+trigger: glob
+globs: "nestjs-project/src/**/*.service.ts, nestjs-project/src/**/*.repository.ts"
 description: 'TypeORM query pitfalls — silent footguns when reading/writing through repositories'
 ---
 

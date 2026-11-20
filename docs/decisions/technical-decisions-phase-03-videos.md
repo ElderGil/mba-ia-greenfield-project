@@ -61,7 +61,7 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: S3 Multipart Upload with Presigned Part URLs (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`)
-- Three-step handshake: (1) client calls `POST /videos/uploads/initiate` → API creates a `draft` video record, calls S3 `CreateMultipartUpload`, and returns `{ videoId, shortCode, uploadId, partSizeBytes }`; (2) client requests presigned `UploadPart` URLs (`POST /videos/:id/uploads/parts`) and `PUT`s chunks (e.g., 5MB–100MB each) directly to MinIO/S3, retrying individual failed parts on network drops; (3) client calls `POST /videos/:id/uploads/complete` with `{ uploadId, parts: [{ partNumber, etag }] }` → API verifies parts/object and enqueues processing. Also supports aborting (`POST /videos/:id/uploads/abort`).
+- Three-step handshake: (1) client calls `POST /videos/uploads/initiate` → API creates a `draft` video record, calls S3 `CreateMultipartUpload`, and returns `{ videoId, shortCode, uploadId, partSizeBytes }`; (2) client requests presigned `UploadPart` URLs (`POST /videos/:id/uploads/parts`) and `PUT`s chunks (e.g., 5MB–100MB each) directly to MinIO/S3, retrying individual failed parts on network drops; (3) client calls `POST /videos/:id/uploads/complete` with `{ parts: [{ partNumber, etag }] }` (_revised 2026-11-20: the API already holds the `uploadId`; the DTO rejects unknown fields, so sending it is a 400_) → API verifies parts/object and enqueues processing. Also supports aborting (`POST /videos/:id/uploads/abort`).
 - **Pros:** Zero video bytes flow through NestJS/Node memory or Express request timeouts; supports up to 5TB (10,000 parts × up to 5GB); natively resumable per part; native S3/MinIO feature requiring no extra upload server.
 - **Cons:** Client must split files into chunks ≥ 5MB (except final part) and collect `ETag` headers; requires MinIO CORS configuration when browser clients upload directly.
 
@@ -81,6 +81,8 @@ _Subprojects in scope:_
 
 > **Revision (2026-11-17, peer review):** presigned part URLs embed the host they were signed for, the same SigV4 constraint that rules out presigned GET in TD-07. The API signs part URLs with a dedicated client bound to `S3_PUBLIC_ENDPOINT` (falls back to `S3_ENDPOINT`, i.e. `minio:9000`, which only resolves inside the Compose network). Clients on the host need `S3_PUBLIC_ENDPOINT=http://localhost:9000`; the test suites run inside the `nestjs-api` container and need it empty. In production it is the public S3 endpoint, and browser uploads additionally need bucket CORS exposing `ETag` (out of scope while the upload UI is not built).
 
+> **Revision (2026-11-20, final review):** same decision, three parameters added. (1) Resume: `GET /videos/:id/uploads/parts` returns the parts already stored (S3 `ListParts`), so a client that lost its ETags can finish the upload (`project-plan.md` §4). (2) Limits: `POST /videos/uploads/initiate` is throttled (10/min) and a channel may hold `VIDEO_MAX_OPEN_DRAFTS` (5) open drafts (`409 TOO_MANY_OPEN_UPLOADS`), because each open draft holds a multipart upload. (3) Complete accepts up to 10 000 parts (JSON body limit 1 MB). Presigned part URLs are signed without a checksum (`requestChecksumCalculation: WHEN_REQUIRED`), which real S3 requires.
+
 **Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
@@ -96,7 +98,7 @@ _Subprojects in scope:_
 **Options:**
 
 ### Option A: AWS SDK v3 (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`) with Private Bucket and Prefix Isolation
-- Uses modular AWS SDK v3 (`3.1169.0`) configured with `endpoint`, `region`, `credentials`, and `forcePathStyle: true` (env-driven so MinIO works locally and AWS S3 works in production). Single private bucket (e.g. `streamtube-media`) with deterministic prefixes: `videos/{channelId}/{videoId}/original` (or `.ext`) and `thumbnails/{channelId}/{videoId}/thumb.jpg`.
+- Uses modular AWS SDK v3 (`^3.1170.0`, the version installed since SI-03.1; this line said `3.1169.0`) configured with `endpoint`, `region`, `credentials`, and `forcePathStyle: true` (env-driven so MinIO works locally and AWS S3 works in production). Single private bucket (e.g. `streamtube-media`) with deterministic prefixes: `videos/{channelId}/{videoId}/original` (or `.ext`) and `thumbnails/{channelId}/{videoId}/thumb.jpg`.
 - **Pros:** Standard TypeScript-first modular SDK, works identically with MinIO and AWS S3, private bucket prevents bypassing API status/ownership/visibility checks (critical for `draft` and future `unlisted` videos), single bucket simplifies IAM/Compose bootstrap.
 - **Cons:** Requires `forcePathStyle: true` configuration for MinIO and explicit bucket initialization on Compose startup.
 
@@ -139,6 +141,8 @@ _Subprojects in scope:_
 
 **Decision:** A (4-state lifecycle: `draft` → `processing` → `ready` | `failed`)
 
+> **Revision (2026-11-20, final review):** same lifecycle; the states that had no way out now have one. A maintenance sweep in the worker (BullMQ job scheduler, every 15 min) deletes drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) after aborting their multipart upload, and moves to `failed` the `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job (API stopped between claim and enqueue, job lost). A job BullMQ fails with `UnrecoverableError` (stalled past `maxStalledCount`) is final even with attempts left.
+
 **Libraries:** —
 
 ---
@@ -171,7 +175,9 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (Dedicated `video-worker` Container + Native `ffmpeg`/`ffprobe` via `child_process`)** — Matches the target C4 architecture, avoids deprecated `fluent-ffmpeg`, and keeps API responsiveness isolated from FFmpeg workloads.
 
-**Decision:** A (Dedicated `video-worker` container + native `ffmpeg`/`ffprobe` via `child_process`, extracting `durationSeconds`, `width`, `height`, `codec`, `sizeBytes`, `mimeType`, and JPEG thumbnail at 1s with 0s fallback)
+**Decision:** A (Dedicated `video-worker` container + native `ffmpeg`/`ffprobe` via `child_process`, extracting `durationSeconds`, `width`, `height`, `codec`, and JPEG thumbnail at 1s with 0s fallback; _revised 2026-11-20: `sizeBytes` comes from the API's `HeadObject` and `mimeType` from initiate, the worker extracts neither; the thumbnail seek is `min(1s, duration/2)` with first-frame fallback, and the demuxer is forced from the stored MIME_)
+
+> **Revision (2026-11-20, final review):** same topology. ffprobe/ffmpeg run with the demuxer forced from the stored MIME (`mov` for mp4/quicktime, `matroska` for webm/mkv) and a protocol whitelist, so images are rejected and a playlist disguised as video cannot make the worker fetch URLs (SSRF). The thumbnail is taken at `min(1s, duration/2)` with a first-frame fallback (a 1.0 s clip has no frame at 1 s). Errors are stored as `"<tool> failed: <stderr>"` with URLs redacted. The container runs `node` directly so SIGTERM reaches Nest and BullMQ drains the active job.
 
 **Libraries:** —
 
@@ -223,7 +229,7 @@ _Subprojects in scope:_
 ### Option A: API Byte-Range Streaming Proxy (`206 Partial Content`) & Attachment Download Endpoint
 - `GET /videos/:shortCode/stream` parses the HTTP `Range` header (`bytes=start-end`), inspects `contentLength` / `contentType` (from DB/S3 `HeadObject`), requests only that byte slice via S3 `GetObjectCommand({ Bucket, Key, Range })`, and pipes the Node `Readable` stream directly to the HTTP response with `206 Partial Content`, `Accept-Ranges: bytes`, `Content-Range`, `Content-Length`, and `Content-Type` (or `200 OK` full stream when no `Range` header is sent, bounded or streamed without buffering).
 - `GET /videos/:shortCode/download` streams the S3 object with `Content-Disposition: attachment; filename="..."` and `Content-Length`.
-- Both endpoints verify `video.status === 'ready'` (returning domain error `409`/`404` otherwise, and leaving future visibility checks in Phase 04/05 cleanly gated in the API).
+- Both endpoints verify `video.status === 'ready'` (returning domain error `404 VIDEO_NOT_FOUND` otherwise — _revised 2026-11-20: was `409 VIDEO_NOT_READY`, which confirmed that an unpublished shortCode exists_ — and leaving future visibility checks in Phase 04/05 cleanly gated in the API).
 - **Pros:** Zero full-file memory buffering (streams chunk-by-chunk from S3); works seamlessly inside Docker Compose without MinIO internal (`minio:9000`) vs host (`localhost:9000`) presigned `Host`-header signature mismatches; directly verifiable via HTTP `Range` assertions (`206`) in E2E tests; centralizes authorization and view-count hooks for Phases 04–05.
 - **Cons:** Video playback bytes traverse the NestJS API process (acceptable for Node streams, and can be switched to CDN/signed URLs in production later without changing the route contract).
 
@@ -240,6 +246,8 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (API Byte-Range `206 Partial Content` Stream Proxy + `Content-Disposition: attachment` Download)** — Delivers true seekable streaming without full-file download or memory buffering, avoids MinIO Docker/host SigV4 host-mismatch issues, enforces domain status/access rules in the API, and keeps the route contract clean for Phase 05's video player.
 
 **Decision:** A (API Byte-Range `206` stream proxy + attachment download; `@Public()` playback/thumbnail/download when `status === 'ready'`, JWT + channel ownership for upload/status/management)
+
+> **Revision (2026-11-20, final review):** same delivery strategy. Public routes answer `404` for videos that are not `ready` (was `409`). Media responses answer `HEAD` without reading storage, send a strong `ETag` with `Cache-Control: no-cache` and `304` on `If-None-Match`, put `Content-Range: bytes */size` on `416`, and use an RFC 6266 `Content-Disposition` (ASCII fallback + UTF-8 `filename*`). Storage streams are opened lazily and piped with `pipeline()`.
 
 **Libraries:** @aws-sdk/client-s3
 

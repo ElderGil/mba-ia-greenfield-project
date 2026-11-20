@@ -1,9 +1,6 @@
 ---
-paths:
-  - 'nestjs-project/**/*.spec.ts'
-  - 'nestjs-project/**/*.integration-spec.ts'
-  - 'nestjs-project/**/*.e2e-spec.ts'
-  - 'nestjs-project/test/**'
+trigger: glob
+globs: "nestjs-project/**/*.spec.ts, nestjs-project/**/*.integration-spec.ts, nestjs-project/**/*.e2e-spec.ts, nestjs-project/test/**"
 description: 'Testing conventions for NestJS unit, integration, and e2e tests'
 ---
 

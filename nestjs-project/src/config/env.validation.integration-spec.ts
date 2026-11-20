@@ -86,3 +86,12 @@ describe('envValidationSchema — Phase 03 Storage, Queue & Video', () => {
     expect(error!.message).toContain('VIDEO_UPLOAD_PART_SIZE_BYTES');
   });
 });
+
+describe('envValidationSchema — MAIL_FROM', () => {
+  it('should default to a valid mailbox, the same one mail.config falls back to', () => {
+    const { value } = validate({});
+
+    // Display name quoted, address outside the quotes (RFC 5322).
+    expect(value.MAIL_FROM).toBe('"StreamTube" <noreply@streamtube.com>');
+  });
+});

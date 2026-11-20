@@ -1,6 +1,6 @@
 # Plan Pipeline — Stage 4: Build → Phase B (SIs + Dependency Map + Deliverables)
 
-This file is loaded by `.claude/skills/plan-build/SKILL.md` after Gate 10 dispatches a resume (case 2: both required sentinelas present), OR after Phase A's A5 pause when the user picks "Continue now". Read SKILL.md for preflight gates, dispatcher rules, hard rules, output contract, and rerun semantics — they apply to every phase.
+This file is loaded by `.agents/skills/plan-build/SKILL.md` after Gate 10 dispatches a resume (case 2: both required sentinelas present), OR after Phase A's A5 pause when the user picks "Continue now". Read SKILL.md for preflight gates, dispatcher rules, hard rules, output contract, and rerun semantics — they apply to every phase.
 
 Phase B runs in two scenarios with **different B1 cost profiles**:
 
@@ -40,8 +40,8 @@ SI order is dependency order (roots first, dependents later). A no-op "Foundatio
 **SI decomposition augmented for UI scope (Decisões #32/#33):**
 
 - **Backend-only SIs** — existing granularity (entity, service, controller). ≤5 Technical actions per SI. Cross-ref numbering scheme below.
-- **Frontend screen SIs** — by default **split into 3 SIs per screen**: `SI-NN.X.0` (drift audit, 1 action — emits `frontend-drift-report.md` per the schema at `.claude/skills/plan-build/references/frontend-drift-report-schema.md`) + `SI-NN.Xa` (visual shell, ≤2 actions: apply drift decisions + figma plugin invocation, per Decisão #32) + `SI-NN.Xb` (lógica & wiring, ≤5 actions). Pure presentational screens skip `SI-NN.Xb` per Decisão #33 criteria but still receive `SI-NN.X.0` + `SI-NN.Xa` (the audit precedes every visual shell — see "Conditional skip of SI-Xb" inside `templates/screen-si.md`).
-- **Frontend Runtime SIs** — flat `SI-NN.X` (no letter suffix, no dotted suffix), one per `#### {td-slug}/TD-NN — {topic}` subsection in `### Frontend Runtime`. Each subsection produces ≥1 SI: 1 Setup SI (provider/root config/lib install) + N Migration SIs (1 per row in the subsection's Migração table) + 1 optional Verification SI (when Verificação requires testing not covered by Setup/Migration). Discriminator vs backend SIs: the SI's Technical actions reference the `### Frontend Runtime → ####` subsection, NOT the backend subsections. Both backend SIs and Frontend Runtime SIs use plain `SI-NN.X` shape (no letter suffix). The conditional-skip rule for `SI-Xb` (Decisão #33) does NOT apply to Frontend Runtime SIs — they are always plain SIs by construction. Read `.claude/skills/plan-build/templates/frontend-runtime-si.md` for the Setup/Migration/Verification template + canonical Dependency contract.
+- **Frontend screen SIs** — by default **split into 3 SIs per screen**: `SI-NN.X.0` (drift audit, 1 action — emits `frontend-drift-report.md` per the schema at `.agents/skills/plan-build/references/frontend-drift-report-schema.md`) + `SI-NN.Xa` (visual shell, ≤2 actions: apply drift decisions + figma plugin invocation, per Decisão #32) + `SI-NN.Xb` (lógica & wiring, ≤5 actions). Pure presentational screens skip `SI-NN.Xb` per Decisão #33 criteria but still receive `SI-NN.X.0` + `SI-NN.Xa` (the audit precedes every visual shell — see "Conditional skip of SI-Xb" inside `templates/screen-si.md`).
+- **Frontend Runtime SIs** — flat `SI-NN.X` (no letter suffix, no dotted suffix), one per `#### {td-slug}/TD-NN — {topic}` subsection in `### Frontend Runtime`. Each subsection produces ≥1 SI: 1 Setup SI (provider/root config/lib install) + N Migration SIs (1 per row in the subsection's Migração table) + 1 optional Verification SI (when Verificação requires testing not covered by Setup/Migration). Discriminator vs backend SIs: the SI's Technical actions reference the `### Frontend Runtime → ####` subsection, NOT the backend subsections. Both backend SIs and Frontend Runtime SIs use plain `SI-NN.X` shape (no letter suffix). The conditional-skip rule for `SI-Xb` (Decisão #33) does NOT apply to Frontend Runtime SIs — they are always plain SIs by construction. Read `.agents/skills/plan-build/templates/frontend-runtime-si.md` for the Setup/Migration/Verification template + canonical Dependency contract.
 - **Cross-layer SIs** — 1 per end-to-end flow where backend and frontend must be implemented together (rare — usually prefer split backend SI + dependent SI-Xb). Title example: `SI-NN.8 — Fluxo de upload (cross-layer)`.
 
 **Numbering convention (CRITICAL — Decisão #34 Round 7 fix):**
@@ -50,7 +50,7 @@ SI order is dependency order (roots first, dependents later). A no-op "Foundatio
 |----------|--------|---------|
 | `SI-NN.X` | Integer SI — default decomposition (backend OR Frontend Runtime — discriminator is the subsection referenced in Technical actions, not the naming) | `SI-03.5` (backend OR Frontend Runtime) |
 | `SI-NN.Xa` / `SI-NN.Xb` | FE screen split (Decisão #32) | `SI-03.5a` (visual), `SI-03.5b` (logic) |
-| `SI-NN.X.0` | Drift audit (precedes `SI-NN.Xa`; emits `frontend-drift-report.md` per the schema at `.claude/skills/plan-build/references/frontend-drift-report-schema.md`) | `SI-02.7.0` (audit signup screen), `SI-02.8.0` (audit login screen) |
+| `SI-NN.X.0` | Drift audit (precedes `SI-NN.Xa`; emits `frontend-drift-report.md` per the schema at `.agents/skills/plan-build/references/frontend-drift-report-schema.md`) | `SI-02.7.0` (audit signup screen), `SI-02.8.0` (audit login screen) |
 | `SI-NN.X.k` (k ≥ 1) | BE auto-split (Decisão #34) | `SI-03.2.1` (Infra), `SI-03.2.2` (behavior) |
 | `SI-NN.0.k` (k ≥ 1) | Bootstrap SI (synthesis from `<path> (new)` markers — pre-FR, pre-screen) | `SI-02.0.1` (install), `SI-02.0.2` (Test batch) |
 
@@ -433,9 +433,9 @@ For each SI:
 
 4. **Draft the SI block** in memory (Description, Technical actions citing TDs inline as `` `auth/TD-03` `` or `(per auth/TD-05)`, Tests table if testable artifacts are produced, Dependencies, Acceptance criteria). **Concrete details must align with the Tech Specs available to Phase B** (from B1(b) on new-session resume, or from the message log on same-session continuation — see SKILL.md § "Hard rules"): entity-touching SIs reference Data Model field names + constraints verbatim; controller/route SIs reference API Contracts request/response shapes verbatim; auth-touching SIs match Authorization Matrix rows; exception handlers cite Error Catalog `errorCode`s exactly; UI screen SIs reference the relevant `#### Screen: {name}` UI Contracts subsection. Do not re-derive these from the raw TD prose — Phase A's normalization is the source of truth here.
 
-   **For UI screen SIs**, also `Read .claude/skills/plan-build/templates/screen-si.md` for the Xa/Xb templates + the conditional skip rule. Skip this Read entirely when `ui_in_scope` is `false`, `deferred`, or `logic-only` (no per-screen SIs to generate in those states).
+   **For UI screen SIs**, also `Read .agents/skills/plan-build/templates/screen-si.md` for the Xa/Xb templates + the conditional skip rule. Skip this Read entirely when `ui_in_scope` is `false`, `deferred`, or `logic-only` (no per-screen SIs to generate in those states).
 
-   **For Frontend Runtime SIs**, `Read .claude/skills/plan-build/templates/frontend-runtime-si.md` for the Setup/Migration/Verification template + canonical Dependency contract (Setup `—`; Migration `SI-NN.<setup>`; Verification `Setup + all Migrations`; cross-section dep `+ backend SI` when applicable). Skip this Read entirely when no TD in scope has `Renders in: frontend-runtime` (explicit OR default-by-inference per `phase-a.md` § A2).
+   **For Frontend Runtime SIs**, `Read .agents/skills/plan-build/templates/frontend-runtime-si.md` for the Setup/Migration/Verification template + canonical Dependency contract (Setup `—`; Migration `SI-NN.<setup>`; Verification `Setup + all Migrations`; cross-section dep `+ backend SI` when applicable). Skip this Read entirely when no TD in scope has `Renders in: frontend-runtime` (explicit OR default-by-inference per `phase-a.md` § A2).
 
 5. **Apply the Acceptance Criteria validation checklist** (below) before committing — refine each AC to be observable, specific, scoped, non-redundant, behavioral-not-implementation, and distinct from Technical actions and Tests.
 
@@ -533,7 +533,7 @@ Follow the shape below literally — Portuguese prose, English identifiers, per-
 ---
 ````
 
-For UI screen SIs (Xa/Xb), see `.claude/skills/plan-build/templates/screen-si.md` (read on demand when `ui_in_scope: true`).
+For UI screen SIs (Xa/Xb), see `.agents/skills/plan-build/templates/screen-si.md` (read on demand when `ui_in_scope: true`).
 
 ---
 

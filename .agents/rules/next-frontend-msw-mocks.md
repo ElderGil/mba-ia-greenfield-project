@@ -1,8 +1,6 @@
 ---
-paths:
-  - 'next-frontend/mocks/**'
-  - 'next-frontend/**/*.integration.test.ts'
-  - 'next-frontend/**/*.integration.test.tsx'
+trigger: glob
+globs: "next-frontend/mocks/**, next-frontend/**/*.integration.test.ts, next-frontend/**/*.integration.test.tsx"
 description: 'MSW handler typing convention + Route Handler integration test pattern (paths-anchored fixtures)'
 ---
 

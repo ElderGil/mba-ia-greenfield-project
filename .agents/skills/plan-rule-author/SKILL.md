@@ -645,7 +645,7 @@ This SKILL only authors rules under one of the three existing dispatch points (`
    1. `Glob docs/rules/{skill-name}/*.md`. If empty, skip.
    2. For each file in alphabetic order: bounded-Read frontmatter; if `status: disabled`, skip silently; otherwise full Read + follow body. Body declares emit prefix, severity, output destination.
 
-   See `.claude/skills/plan-rule-author/SKILL.md` for the canonical rule contract.
+   See `.agents/skills/plan-rule-author/SKILL.md` for the canonical rule contract.
    ```
 
 4. (Optional) Update this SKILL.md's Step 1 question block (lines ~62-71) to list the new dispatch point as option 4, and add corresponding Emission contract + Suppressions blocks to the `## Per-dispatch boilerplate library` so future rules under the new point are scaffoldable.

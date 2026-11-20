@@ -78,6 +78,11 @@ describe('S3StorageService (integration)', () => {
       300,
     );
     expect(presignedUrl).toContain(key);
+    // A signed checksum of an empty body (CRC32 AAAAAA==) is accepted by
+    // MinIO but makes real S3 reject the client's PUT with BadDigest.
+    expect(presignedUrl).not.toMatch(
+      /x-amz-checksum-|x-amz-sdk-checksum-algorithm/i,
+    );
 
     const putRes = await fetch(presignedUrl, {
       method: 'PUT',
@@ -93,6 +98,38 @@ describe('S3StorageService (integration)', () => {
 
     const head = await storageService.headObject(key);
     expect(head.contentLength).toBe(payload.length);
+  });
+
+  it('lists the parts already uploaded, across pages, so a client can resume', async () => {
+    const key = `tests/list-parts-${Date.now()}.mp4`;
+    createdKeys.push(key);
+    const uploadId = await storageService.createMultipartUpload(
+      key,
+      'video/mp4',
+    );
+    const etags: string[] = [];
+    for (const partNumber of [1, 2]) {
+      const url = await storageService.getPresignedPartUrl(
+        key,
+        uploadId,
+        partNumber,
+        60,
+      );
+      const put = await fetch(url, {
+        method: 'PUT',
+        body: `part-${partNumber}`,
+      });
+      etags.push(put.headers.get('etag')!);
+    }
+
+    // pageSize 1 forces the NextPartNumberMarker pagination path.
+    const parts = await storageService.listUploadedParts(key, uploadId, 1);
+
+    expect(parts).toEqual([
+      { partNumber: 1, etag: etags[0], sizeBytes: 6 },
+      { partNumber: 2, etag: etags[1], sizeBytes: 6 },
+    ]);
+    await storageService.abortMultipartUpload(key, uploadId);
   });
 
   it('aborts an active multipart upload cleanly', async () => {
