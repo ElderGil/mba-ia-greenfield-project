@@ -45,6 +45,8 @@ export const envValidationSchema = Joi.object({
     .max(104857600)
     .default(10485760),
   VIDEO_MAX_OPEN_DRAFTS: Joi.number().integer().positive().default(5),
+  VIDEO_DRAFT_TTL_HOURS: Joi.number().integer().positive().default(24),
+  VIDEO_PROCESSING_STUCK_MINUTES: Joi.number().integer().positive().default(30),
   VIDEO_PRESIGNED_URL_EXPIRES_IN: Joi.number()
     .integer()
     .positive()
