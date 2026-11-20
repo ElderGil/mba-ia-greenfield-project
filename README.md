@@ -84,7 +84,7 @@ sequenceDiagram
     end
 
     C->>API: POST /videos/:id/uploads/complete (ETags)
-    API->>DB: Reserva draft -> processing (UPDATE condicional; perdedor recebe 409)
+    API->>DB: Reserva draft -> processing (UPDATE condicional, perdedor recebe 409)
     API->>S3: CompleteMultipartUpload + HeadObject
     API->>Q: Enfileira job process-video (falha -> failed)
     API-->>C: 202 / status processing
