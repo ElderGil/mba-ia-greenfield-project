@@ -332,9 +332,92 @@ describe('Videos (e2e)', () => {
       .expect(200);
 
     expect(downloadRes.headers['content-disposition']).toBe(
-      'attachment; filename="sample.mp4"',
+      `attachment; filename="sample.mp4"; filename*=UTF-8''sample.mp4`,
     );
     expect(Buffer.compare(downloadRes.body as Buffer, sampleMp4)).toBe(0);
+  }, 30000);
+
+  async function uploadReadyVideo(
+    accessToken: string,
+    filename: string,
+  ): Promise<{ shortCode: string }> {
+    const initRes = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Regression video',
+        filename,
+        mimeType: 'video/mp4',
+        sizeBytes: sampleMp4.length,
+      })
+      .expect(201);
+    const { videoId, shortCode, storageKey } =
+      initRes.body as InitiateUploadResponseDto;
+    createdStorageKeys.push(storageKey);
+
+    const partRes = await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/parts`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ partNumber: 1 })
+      .expect(200);
+    const putRes = await fetch(
+      (partRes.body as SignUploadPartResponseDto).presignedUrl,
+      { method: 'PUT', body: new Uint8Array(sampleMp4) },
+    );
+    await request(app.getHttpServer())
+      .post(`/videos/${videoId}/uploads/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [{ partNumber: 1, etag: putRes.headers.get('etag') }] })
+      .expect(202);
+
+    const settled = await pollVideoUntilSettled(accessToken, videoId);
+    expect(settled.status).toBe(VideoStatus.READY);
+    if (settled.thumbnailKey) createdStorageKeys.push(settled.thumbnailKey);
+    return { shortCode };
+  }
+
+  it('downloads files whose name is outside Latin-1 and answers HEAD without reading storage', async () => {
+    const { accessToken } = await registerConfirmAndLogin('filename');
+    const { shortCode } = await uploadReadyVideo(
+      accessToken,
+      'Aula 01 – Introdução.mp4',
+    );
+
+    const downloadRes = await request(app.getHttpServer())
+      .get(`/videos/${shortCode}/download`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(downloadRes.headers['content-disposition']).toBe(
+      `attachment; filename="Aula 01 _ Introducao.mp4"; filename*=UTF-8''Aula%2001%20%E2%80%93%20Introdu%C3%A7%C3%A3o.mp4`,
+    );
+    expect(Buffer.compare(downloadRes.body as Buffer, sampleMp4)).toBe(0);
+
+    const getObject = jest.spyOn(storageService, 'getObjectStream');
+    try {
+      for (const route of ['stream', 'download']) {
+        const headRes = await request(app.getHttpServer())
+          .head(`/videos/${shortCode}/${route}`)
+          .expect(200);
+        expect(headRes.headers['content-length']).toBe(
+          String(sampleMp4.length),
+        );
+      }
+      const rangedHead = await request(app.getHttpServer())
+        .head(`/videos/${shortCode}/stream`)
+        .set('Range', 'bytes=0-99')
+        .expect(206);
+      expect(rangedHead.headers['content-range']).toBe(
+        `bytes 0-99/${sampleMp4.length}`,
+      );
+      expect(getObject).not.toHaveBeenCalled();
+    } finally {
+      getObject.mockRestore();
+    }
   }, 30000);
 
   it('generates distinct unique shortCodes for multiple videos', async () => {

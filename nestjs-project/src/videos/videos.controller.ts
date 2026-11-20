@@ -5,9 +5,11 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
+  Req,
   Res,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -20,7 +22,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -35,6 +37,7 @@ import {
   VideoOwnerResponseDto,
   VideoPublicResponseDto,
 } from './dto/video-response.dto';
+import { buildContentDisposition, sendMedia } from './videos-http.util';
 import { VideosUploadService } from './videos-upload.service';
 import { VideosService } from './videos.service';
 
@@ -42,6 +45,8 @@ import { VideosService } from './videos.service';
 @ApiTags('videos')
 @Controller('videos')
 export class VideosController {
+  private readonly logger = new Logger(VideosController.name);
+
   constructor(
     private readonly videosUploadService: VideosUploadService,
     private readonly videosService: VideosService,
@@ -352,20 +357,28 @@ export class VideosController {
   async streamVideo(
     @Param('shortCode') shortCode: string,
     @Headers('range') range: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     const payload = await this.videosService.getVideoStream(shortCode, range);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Content-Type', payload.contentType);
-    res.setHeader('Content-Length', String(payload.contentLength));
+    const headers: Record<string, string> = {
+      'Accept-Ranges': 'bytes',
+      'Content-Type': payload.contentType,
+      'Content-Length': String(payload.contentLength),
+    };
     if (payload.isPartial && payload.contentRange) {
-      res.setHeader('Content-Range', payload.contentRange);
-      res.status(HttpStatus.PARTIAL_CONTENT);
-    } else {
-      res.status(HttpStatus.OK);
+      headers['Content-Range'] = payload.contentRange;
     }
-    res.on('close', () => payload.stream.destroy());
-    payload.stream.pipe(res);
+    await sendMedia(
+      req,
+      res,
+      {
+        status: payload.isPartial ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK,
+        headers,
+        open: payload.open,
+      },
+      (err) => this.logSourceError(shortCode, err),
+    );
   }
 
   @Public()
@@ -388,18 +401,24 @@ export class VideosController {
   })
   async downloadVideo(
     @Param('shortCode') shortCode: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     const payload = await this.videosService.getVideoDownload(shortCode);
-    res.setHeader('Content-Type', payload.contentType);
-    res.setHeader('Content-Length', String(payload.contentLength));
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${payload.filename}"`,
+    await sendMedia(
+      req,
+      res,
+      {
+        status: HttpStatus.OK,
+        headers: {
+          'Content-Type': payload.contentType,
+          'Content-Length': String(payload.contentLength),
+          'Content-Disposition': buildContentDisposition(payload.filename),
+        },
+        open: payload.open,
+      },
+      (err) => this.logSourceError(shortCode, err),
     );
-    res.status(HttpStatus.OK);
-    res.on('close', () => payload.stream.destroy());
-    payload.stream.pipe(res);
   }
 
   @Public()
@@ -422,15 +441,25 @@ export class VideosController {
   })
   async getThumbnail(
     @Param('shortCode') shortCode: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     const payload = await this.videosService.getThumbnailStream(shortCode);
-    res.setHeader('Content-Type', payload.contentType);
-    if (payload.contentLength !== undefined) {
-      res.setHeader('Content-Length', String(payload.contentLength));
-    }
-    res.status(HttpStatus.OK);
-    res.on('close', () => payload.stream.destroy());
-    payload.stream.pipe(res);
+    await sendMedia(
+      req,
+      res,
+      {
+        status: HttpStatus.OK,
+        headers: { 'Content-Type': payload.contentType },
+        open: payload.open,
+      },
+      (err) => this.logSourceError(shortCode, err),
+    );
+  }
+
+  private logSourceError(shortCode: string, err: Error): void {
+    this.logger.warn(
+      `Storage stream for video ${shortCode} failed mid-response: ${err.message}`,
+    );
   }
 }

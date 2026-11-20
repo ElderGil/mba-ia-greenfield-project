@@ -143,6 +143,8 @@ describe('VideosService', () => {
       });
 
       const res = await service.getVideoStream('abc12345678', 'bytes=0-9');
+      expect(mockStorageService.getObjectStream).not.toHaveBeenCalled();
+      await res.open();
 
       expect(mockStorageService.getObjectStream).toHaveBeenCalledWith(
         'videos/c1/v1/original.mp4',
@@ -153,25 +155,23 @@ describe('VideosService', () => {
       expect(res.contentRange).toBe('bytes 0-9/1000');
     });
 
-    it('sanitizes download filename in getVideoDownload', async () => {
+    it('returns the stored filename and size without opening storage in getVideoDownload', async () => {
       mockVideoRepo.findOne.mockResolvedValue({
         id: 'v1',
         short_code: 'abc12345678',
         status: VideoStatus.READY,
         storage_key: 'videos/c1/v1/original.mp4',
-        original_filename: '../evil"clip\n.mp4',
+        original_filename: 'Aula 01 – Introdução.mp4',
         mime_type: 'video/mp4',
         size_bytes: '100',
       });
-      mockStorageService.getObjectStream.mockResolvedValue({
-        stream: Readable.from(Buffer.from('abc')),
-        contentLength: 100,
-        contentRange: undefined,
-        contentType: 'video/mp4',
-      });
 
       const res = await service.getVideoDownload('abc12345678');
-      expect(res.filename).toBe('evilclip.mp4');
+
+      // Header encoding is the HTTP layer's job (buildContentDisposition).
+      expect(res.filename).toBe('Aula 01 – Introdução.mp4');
+      expect(res.contentLength).toBe(100);
+      expect(mockStorageService.getObjectStream).not.toHaveBeenCalled();
     });
   });
 });

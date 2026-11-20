@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Readable } from 'node:stream';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import {
@@ -12,14 +11,17 @@ import {
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
+import type { OpenedMedia } from './videos-http.util';
 
 export interface ParsedByteRange {
   start: number;
   end: number;
 }
 
+// Storage is opened lazily (open) so HEAD requests and requests rejected
+// before the body never touch the object store.
 export interface VideoStreamPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
   contentType: string;
   contentLength: number;
   totalSize: number;
@@ -28,22 +30,16 @@ export interface VideoStreamPayload {
 }
 
 export interface VideoDownloadPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
   contentType: string;
   contentLength: number;
   filename: string;
 }
 
 export interface VideoThumbnailPayload {
-  stream: Readable;
+  open: () => Promise<OpenedMedia>;
   contentType: string;
   contentLength?: number;
-}
-
-function sanitizeDownloadFilename(filename: string): string {
-  const base = filename.split(/[/\\]/).pop() ?? 'video.mp4';
-  const cleaned = base.replace(/["\r\n]/g, '').trim();
-  return cleaned.length > 0 ? cleaned : 'video.mp4';
 }
 
 @Injectable()
@@ -155,15 +151,13 @@ export class VideosService {
     const video = await this.getReadyVideoByShortCode(shortCode);
     const totalSize = Number(video.size_bytes);
 
+    const storageKey = video.storage_key!;
+
     if (rangeHeader) {
       const { start, end } = this.parseByteRange(rangeHeader, totalSize);
       const range = `bytes=${start}-${end}`;
-      const res = await this.storageService.getObjectStream(
-        video.storage_key!,
-        range,
-      );
       return {
-        stream: res.stream,
+        open: () => this.storageService.getObjectStream(storageKey, range),
         contentType: video.mime_type,
         contentLength: end - start + 1,
         totalSize,
@@ -172,11 +166,10 @@ export class VideosService {
       };
     }
 
-    const res = await this.storageService.getObjectStream(video.storage_key!);
     return {
-      stream: res.stream,
+      open: () => this.storageService.getObjectStream(storageKey),
       contentType: video.mime_type,
-      contentLength: res.contentLength ?? totalSize,
+      contentLength: totalSize,
       totalSize,
       isPartial: false,
     };
@@ -184,13 +177,13 @@ export class VideosService {
 
   async getVideoDownload(shortCode: string): Promise<VideoDownloadPayload> {
     const video = await this.getReadyVideoByShortCode(shortCode);
-    const res = await this.storageService.getObjectStream(video.storage_key!);
+    const storageKey = video.storage_key!;
 
     return {
-      stream: res.stream,
+      open: () => this.storageService.getObjectStream(storageKey),
       contentType: video.mime_type,
-      contentLength: res.contentLength ?? Number(video.size_bytes),
-      filename: sanitizeDownloadFilename(video.original_filename),
+      contentLength: Number(video.size_bytes),
+      filename: video.original_filename,
     };
   }
 
@@ -200,11 +193,10 @@ export class VideosService {
       throw new VideoNotReadyException();
     }
 
-    const res = await this.storageService.getObjectStream(video.thumbnail_key);
+    const thumbnailKey = video.thumbnail_key;
     return {
-      stream: res.stream,
-      contentType: res.contentType ?? 'image/jpeg',
-      contentLength: res.contentLength,
+      open: () => this.storageService.getObjectStream(thumbnailKey),
+      contentType: 'image/jpeg',
     };
   }
 }
