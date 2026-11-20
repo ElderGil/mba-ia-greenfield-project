@@ -21,7 +21,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    command: ["npm", "run", "start:worker:dev"]
+    # node runs directly (no `npm run` / `sh -c` in between) so SIGTERM from
+    # `docker compose stop/restart` reaches Nest's shutdown hooks and BullMQ
+    # can finish the active job instead of leaving it to stall. `init` reaps
+    # the ffmpeg/ffprobe children.
+    command: ["node", "-r", "ts-node/register", "-r", "tsconfig-paths/register", "src/worker.main.ts"]
+    init: true
+    # ffprobe + ffmpeg are capped at 60 s each; give an active job time to end.
+    stop_grace_period: 3m
     # On a fresh clone node_modules only exists after `npm install`; keep
     # retrying instead of staying down after the first failed start.
     restart: unless-stopped

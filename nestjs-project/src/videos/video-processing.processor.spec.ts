@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
 import { MediaProcessorService } from './media-processor.service';
@@ -98,6 +98,23 @@ describe('VideoProcessingProcessor', () => {
   it('does not mark failed while retry attempts remain', async () => {
     await processor.onFailed(job, new Error('transient error'));
     expect(mockVideoRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('marks video failed when BullMQ fails the job for good before attempts run out (stalled job)', async () => {
+    // BullMQ moves a job that stalled more than maxStalledCount straight to
+    // failed with an UnrecoverableError, whatever attemptsMade says.
+    await processor.onFailed(
+      job,
+      new UnrecoverableError('job stalled more than allowable limit'),
+    );
+
+    expect(mockVideoRepo.update).toHaveBeenCalledWith(
+      { id: 'v1' },
+      {
+        status: VideoStatus.FAILED,
+        processing_error: 'job stalled more than allowable limit',
+      },
+    );
   });
 
   it('marks video failed once max attempts are exhausted', async () => {
