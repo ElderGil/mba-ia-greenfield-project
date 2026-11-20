@@ -51,9 +51,9 @@ import { envValidationSchema } from './config/env.validation';
       inject: [queueConfig.KEY],
       useFactory: (qConfig: ConfigType<typeof queueConfig>) => ({
         ...bullRootOptions(qConfig),
+        // Retention only: attempts and backoff belong to the producer
+        // (VideosQueueService), the one place a job's retry policy is set.
         defaultJobOptions: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: 100,
           removeOnFail: 500,
         },
