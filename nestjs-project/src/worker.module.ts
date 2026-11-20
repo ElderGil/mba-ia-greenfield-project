@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Channel } from './channels/entities/channel.entity';
 import databaseConfig from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
-import queueConfig from './config/queue.config';
+import queueConfig, { bullRootOptions } from './config/queue.config';
 import storageConfig from './config/storage.config';
 import videoConfig from './config/video.config';
 import { StorageModule } from './storage/storage.module';
@@ -41,11 +41,7 @@ import { VIDEO_PROCESSING_QUEUE } from './videos/videos-queue.constants';
     BullModule.forRootAsync({
       inject: [queueConfig.KEY],
       useFactory: (qConfig: ConfigType<typeof queueConfig>) => ({
-        connection: {
-          host: qConfig.redisHost,
-          port: qConfig.redisPort,
-          password: qConfig.redisPassword,
-        },
+        ...bullRootOptions(qConfig),
       }),
     }),
     BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),

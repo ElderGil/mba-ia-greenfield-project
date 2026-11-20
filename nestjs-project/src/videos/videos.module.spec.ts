@@ -5,7 +5,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
-import queueConfig from '../config/queue.config';
+import queueConfig, { bullRootOptions } from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
@@ -28,12 +28,8 @@ describe('VideosModule', () => {
         }),
         BullModule.forRootAsync({
           inject: [queueConfig.KEY],
-          useFactory: (cfg: ConfigType<typeof queueConfig>) => ({
-            connection: {
-              host: cfg.redisHost,
-              port: cfg.redisPort,
-            },
-          }),
+          useFactory: (cfg: ConfigType<typeof queueConfig>) =>
+            bullRootOptions(cfg),
         }),
         VideosModule,
       ],

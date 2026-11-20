@@ -11,7 +11,7 @@ import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
 import databaseConfig from '../config/database.config';
-import queueConfig from '../config/queue.config';
+import queueConfig, { bullRootOptions } from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
@@ -60,13 +60,8 @@ describe('VideosUploadService (integration)', () => {
         TypeOrmModule.forFeature([Video]),
         BullModule.forRootAsync({
           inject: [queueConfig.KEY],
-          useFactory: (qCfg: ConfigType<typeof queueConfig>) => ({
-            connection: {
-              host: qCfg.redisHost,
-              port: qCfg.redisPort,
-              password: qCfg.redisPassword,
-            },
-          }),
+          useFactory: (qCfg: ConfigType<typeof queueConfig>) =>
+            bullRootOptions(qCfg),
         }),
         BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
         ChannelsModule,

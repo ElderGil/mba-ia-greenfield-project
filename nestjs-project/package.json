@@ -98,7 +98,8 @@
     "testEnvironment": "node",
     "maxWorkers": 1,
     "setupFiles": [
-      "dotenv/config"
+      "dotenv/config",
+      "<rootDir>/test/test-env.ts"
     ]
   }
 }

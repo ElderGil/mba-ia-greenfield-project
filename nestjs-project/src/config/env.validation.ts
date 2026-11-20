@@ -35,6 +35,7 @@ export const envValidationSchema = Joi.object({
   REDIS_HOST: Joi.string().default('redis'),
   REDIS_PORT: Joi.number().port().default(6379),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
+  QUEUE_PREFIX: Joi.string().default('bull'),
 
   // Video Upload & Processing
   VIDEO_MAX_SIZE_BYTES: Joi.number().integer().positive().default(10737418240),
