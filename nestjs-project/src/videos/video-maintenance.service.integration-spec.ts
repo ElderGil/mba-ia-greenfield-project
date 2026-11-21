@@ -101,6 +101,19 @@ describe('VideoMaintenanceService (integration)', () => {
   beforeEach(async () => {
     await cleanAllTables(dataSource);
     await queue.obliterate({ force: true });
+    // The multipart pass lists the whole shared test bucket. Each case only
+    // sees the sessions it tracked, so uploads left by earlier or concurrent
+    // runs are never aborted by these suites.
+    const listUploads = storageService.listIncompleteUploads.bind(
+      storageService,
+    ) as S3StorageService['listIncompleteUploads'];
+    jest
+      .spyOn(storageService, 'listIncompleteUploads')
+      .mockImplementation(async function* (prefix) {
+        for await (const upload of listUploads(prefix)) {
+          if (multipartUploads.owns(upload.uploadId)) yield upload;
+        }
+      });
   });
 
   afterEach(async () => {
@@ -185,32 +198,31 @@ describe('VideoMaintenanceService (integration)', () => {
       { jobId: `process-video-${active.videoId}` },
     );
 
-    // Use a future clock for these two known fixtures, and protect resources
-    // left by another invocation sharing the test bucket.
-    const listUploads = storageService.listIncompleteUploads.bind(
-      storageService,
-    ) as S3StorageService['listIncompleteUploads'];
-    const listSpy = jest
-      .spyOn(storageService, 'listIncompleteUploads')
-      .mockImplementation(async function* (prefix) {
-        for await (const upload of listUploads(prefix)) {
-          if (
-            upload.uploadId === orphanId ||
-            upload.uploadId === active.uploadId
-          )
-            yield upload;
-        }
-      });
+    // A future clock makes both tracked sessions older than the TTL.
+    await maintenance.sweep(new Date(Date.now() + 25 * 3_600_000));
+    await expect(
+      storageService.listUploadedParts(orphanKey, orphanId),
+    ).rejects.toMatchObject({ name: 'NoSuchUpload' });
+    await expect(
+      storageService.listUploadedParts(active.storageKey, active.uploadId),
+    ).resolves.toEqual([]);
+  });
+
+  it('leaves multipart sessions it did not create in the shared test bucket', async () => {
+    // Stands in for a session left by another run: matching key layout, no
+    // row, and old enough for the sweep once the clock moves 25 h ahead.
+    const externalKey = `videos/${randomUUID()}/${randomUUID()}/original.mp4`;
+    const externalId = await storageService.createMultipartUpload(
+      externalKey,
+      'video/mp4',
+    );
     try {
       await maintenance.sweep(new Date(Date.now() + 25 * 3_600_000));
       await expect(
-        storageService.listUploadedParts(orphanKey, orphanId),
-      ).rejects.toMatchObject({ name: 'NoSuchUpload' });
-      await expect(
-        storageService.listUploadedParts(active.storageKey, active.uploadId),
+        storageService.listUploadedParts(externalKey, externalId),
       ).resolves.toEqual([]);
     } finally {
-      listSpy.mockRestore();
+      await storageService.abortMultipartUpload(externalKey, externalId);
     }
   });
 

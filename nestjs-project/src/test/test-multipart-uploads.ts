@@ -14,6 +14,10 @@ export class TestMultipartUploads {
     return upload;
   }
 
+  owns(uploadId: string): boolean {
+    return this.uploads.some((upload) => upload.uploadId === uploadId);
+  }
+
   async abortRemaining(storage: S3StorageService): Promise<void> {
     // Use the IDs created by this test, so concurrent runs and pre-existing
     // uploads in the bucket are never swept by suite teardown.
