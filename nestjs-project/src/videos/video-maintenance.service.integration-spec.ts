@@ -16,7 +16,9 @@ import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
+import { deferred, settled } from '../test/deferred';
 import { User } from '../users/entities/user.entity';
+import { VideoInvalidStateException } from '../common/exceptions/domain.exception';
 import { Video, VideoStatus } from './entities/video.entity';
 import { VideoMaintenanceService } from './video-maintenance.service';
 import {
@@ -54,7 +56,6 @@ describe('VideoMaintenanceService (integration)', () => {
             password: dbCfg.password,
             database: dbCfg.name,
             entities: [User, Channel, RefreshToken, VerificationToken, Video],
-            synchronize: true,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
@@ -172,12 +173,7 @@ describe('VideoMaintenanceService (integration)', () => {
     // A backlog: the job exists and is still waiting for a worker.
     await queue.add(
       'process-video',
-      {
-        videoId: queued.videoId,
-        channelId: 'c',
-        storageKey: queued.storageKey,
-        mimeType: 'video/mp4',
-      },
+      { videoId: queued.videoId },
       { jobId: `process-video-${queued.videoId}` },
     );
 
@@ -227,7 +223,108 @@ describe('VideoMaintenanceService (integration)', () => {
       expect(result.abortedDrafts).toBe(1);
       expect(await videoRepo.findOneBy({ id: stale.videoId })).toBeNull();
       // Kept for the next sweep instead of losing track of the upload.
-      expect(await videoRepo.findOneBy({ id: broken.videoId })).not.toBeNull();
+      const kept = await videoRepo.findOneByOrFail({ id: broken.videoId });
+      expect(kept.status).toBe(VideoStatus.DRAFT);
+      expect(kept.upload_id).toBe(broken.uploadId);
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('lets a stale-draft sweep that started first win over a concurrent complete', async () => {
+    const userId = await createOwnerId();
+    const stale = await initiate(userId);
+    await age(stale.videoId, 'created_at', '25 hours');
+    const sweepAtStorage = deferred();
+    const releaseSweep = deferred();
+    const completeAtStorage = deferred();
+    const sweepDone = deferred();
+    // Each spy pauses its call once, then restores and runs the real one.
+    const abortSpy = jest.spyOn(storageService, 'abortMultipartUpload');
+    abortSpy.mockImplementationOnce(async (key, uploadId) => {
+      sweepAtStorage.resolve();
+      await releaseSweep.promise;
+      abortSpy.mockRestore();
+      return storageService.abortMultipartUpload(key, uploadId);
+    });
+    const completeSpy = jest.spyOn(storageService, 'completeMultipartUpload');
+    completeSpy.mockImplementationOnce(async (key, uploadId, parts) => {
+      completeAtStorage.resolve();
+      await sweepDone.promise;
+      completeSpy.mockRestore();
+      return storageService.completeMultipartUpload(key, uploadId, parts);
+    });
+
+    try {
+      const sweep = maintenance.sweep(new Date());
+      void settled(sweep).then(sweepDone.resolve);
+      await sweepAtStorage.promise;
+      const complete = uploadService.completeUpload(userId, stale.videoId, [
+        { partNumber: 1, etag: '"etag"' },
+      ]);
+      await Promise.race([completeAtStorage.promise, settled(complete)]);
+      releaseSweep.resolve();
+      const [sweepResult, completeResult] = await Promise.allSettled([
+        sweep,
+        complete,
+      ]);
+
+      expect(sweepResult).toEqual({
+        status: 'fulfilled',
+        value: { abortedDrafts: 1, failedOrphans: 0 },
+      });
+      expect(completeResult.status).toBe('rejected');
+      expect((completeResult as PromiseRejectedResult).reason).toBeInstanceOf(
+        VideoInvalidStateException,
+      );
+      expect(await videoRepo.findOneBy({ id: stale.videoId })).toBeNull();
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('reaches drafts beyond a full batch of drafts it cannot remove', async () => {
+    const userId = await createOwnerId();
+    const channel = await channelsService.findByUserId(userId);
+    // 100 stale drafts (a whole batch) whose abort keeps failing, all older
+    // than one removable draft.
+    const stuck = Array.from({ length: 100 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      upload_id: `stuck-${i}`,
+      storage_key: `videos/stuck/${i}/original.mp4`,
+      short_code: `Stuck${String(i).padStart(6, '0')}`,
+    }));
+    const removable = {
+      id: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+      upload_id: null,
+      storage_key: null,
+      short_code: 'Removable01',
+    };
+    await videoRepo.insert(
+      [...stuck, removable].map((row) => ({
+        ...row,
+        channel_id: channel!.id,
+        title: 'Stale',
+        original_filename: 'stale.mp4',
+        status: VideoStatus.DRAFT,
+        mime_type: 'video/mp4',
+        size_bytes: '1024',
+      })),
+    );
+    await dataSource.query(
+      `UPDATE videos SET created_at = now() - interval '26 hours' WHERE upload_id IS NOT NULL`,
+    );
+    await age(removable.id, 'created_at', '25 hours');
+    jest
+      .spyOn(storageService, 'abortMultipartUpload')
+      .mockRejectedValue(new Error('storage unavailable'));
+
+    try {
+      const result = await maintenance.sweep(new Date());
+
+      expect(result.abortedDrafts).toBe(1);
+      expect(await videoRepo.findOneBy({ id: removable.id })).toBeNull();
+      expect(await videoRepo.count()).toBe(100);
     } finally {
       jest.restoreAllMocks();
     }

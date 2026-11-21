@@ -3,7 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
-import { LessThan, Repository } from 'typeorm';
+import { type FindOptionsWhere, LessThan, MoreThan, Repository } from 'typeorm';
 import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -12,14 +12,15 @@ import {
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
 } from './videos-queue.constants';
+import { discardDraftUpload } from './video-upload-session';
 
 export interface SweepResult {
   abortedDrafts: number;
   failedOrphans: number;
 }
 
-// Bounded per run; the next sweep picks up the rest.
-const SWEEP_BATCH = 100;
+// Rows read per query; a run pages through every eligible row.
+const SWEEP_PAGE = 100;
 // States in which the job will still move the video out of processing.
 const LIVE_JOB_STATES = new Set([
   'active',
@@ -68,63 +69,48 @@ export class VideoMaintenanceService {
     const cutoff = new Date(
       now.getTime() - this.config.draftTtlHours * 3_600_000,
     );
-    const drafts = await this.videoRepository.find({
-      where: { status: VideoStatus.DRAFT, created_at: LessThan(cutoff) },
-      order: { created_at: 'ASC' },
-      take: SWEEP_BATCH,
-    });
-
     let removed = 0;
-    for (const draft of drafts) {
+    const where = { status: VideoStatus.DRAFT, created_at: LessThan(cutoff) };
+    await this.forEachEligible(where, async (draft) => {
       try {
-        if (draft.storage_key && draft.upload_id) {
-          await this.abortUpload(draft.storage_key, draft.upload_id);
+        // Same claim as complete: a draft completed meanwhile is skipped.
+        if (
+          await discardDraftUpload(
+            this.videoRepository,
+            this.storageService,
+            draft,
+          )
+        ) {
+          removed++;
         }
-        // Conditional: a draft completed meanwhile is no longer a draft.
-        const res = await this.videoRepository.delete({
-          id: draft.id,
-          status: VideoStatus.DRAFT,
-        });
-        if (res.affected === 1) removed++;
       } catch (err) {
         // Background task: keep the row so the next sweep retries it.
         this.logger.warn(
           `Could not remove stale draft ${draft.id}: ${(err as Error).message}`,
         );
       }
-    }
+    });
     return removed;
-  }
-
-  private async abortUpload(key: string, uploadId: string): Promise<void> {
-    try {
-      await this.storageService.abortMultipartUpload(key, uploadId);
-    } catch (err) {
-      // Already aborted (by a lifecycle rule or a previous sweep): done.
-      if ((err as { name?: string }).name === 'NoSuchUpload') return;
-      throw err;
-    }
   }
 
   private async failOrphanedProcessing(now: Date): Promise<number> {
     const cutoff = new Date(
       now.getTime() - this.config.processingStuckMinutes * 60_000,
     );
-    const stuck = await this.videoRepository.find({
-      where: { status: VideoStatus.PROCESSING, updated_at: LessThan(cutoff) },
-      order: { updated_at: 'ASC' },
-      take: SWEEP_BATCH,
-    });
-
     let failed = 0;
-    for (const video of stuck) {
+    const where = {
+      status: VideoStatus.PROCESSING,
+      updated_at: LessThan(cutoff),
+    };
+    await this.forEachEligible(where, async (video) => {
       const job = await this.processingQueue.getJob(
         processVideoJobId(video.id),
       );
-      if (job && LIVE_JOB_STATES.has(await job.getState())) continue;
+      if (job && LIVE_JOB_STATES.has(await job.getState())) return;
 
+      // Same predicate as the read: a row touched since is left alone.
       const res = await this.videoRepository.update(
-        { id: video.id, status: VideoStatus.PROCESSING },
+        { id: video.id, ...where },
         {
           status: VideoStatus.FAILED,
           processing_error:
@@ -132,7 +118,32 @@ export class VideoMaintenanceService {
         },
       );
       if (res.affected === 1) failed++;
-    }
+    });
     return failed;
+  }
+
+  /**
+   * Visits every row matching `where`, paging by id (keyset). A fixed
+   * "oldest N" window let rows that keep failing (or a backlog of live
+   * jobs) hide every row behind them forever; memory stays bounded by the
+   * page size, and rows deleted while paging do not shift the cursor.
+   */
+  private async forEachEligible(
+    where: FindOptionsWhere<Video>,
+    visit: (video: Video) => Promise<void>,
+  ): Promise<void> {
+    let after: string | undefined;
+    for (;;) {
+      const page = await this.videoRepository.find({
+        where: after ? { ...where, id: MoreThan(after) } : where,
+        order: { id: 'ASC' },
+        take: SWEEP_PAGE,
+      });
+      for (const video of page) {
+        await visit(video);
+      }
+      if (page.length < SWEEP_PAGE) return;
+      after = page[page.length - 1].id;
+    }
   }
 }

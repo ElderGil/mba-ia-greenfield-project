@@ -80,6 +80,15 @@ describe('envValidationSchema — Phase 03 Storage, Queue & Video', () => {
     expect(value.VIDEO_UPLOAD_PART_SIZE_BYTES).toBe(10485760);
   });
 
+  it('should reject a presigned URL lifetime above the 7 days SigV4 allows', () => {
+    expect(validate({ VIDEO_PRESIGNED_URL_EXPIRES_IN: '604800' }).error).toBe(
+      undefined,
+    );
+    const { error } = validate({ VIDEO_PRESIGNED_URL_EXPIRES_IN: '604801' });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('VIDEO_PRESIGNED_URL_EXPIRES_IN');
+  });
+
   it('should reject VIDEO_UPLOAD_PART_SIZE_BYTES below 5 MiB S3 minimum', () => {
     const { error } = validate({ VIDEO_UPLOAD_PART_SIZE_BYTES: '1048576' });
     expect(error).toBeDefined();

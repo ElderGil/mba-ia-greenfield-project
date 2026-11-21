@@ -97,6 +97,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "maxWorkers": 1,
+    "globalSetup": "<rootDir>/test/global-setup.ts",
     "setupFiles": [
       "dotenv/config",
       "<rootDir>/test/test-env.ts"

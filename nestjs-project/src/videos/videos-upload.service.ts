@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
@@ -25,12 +25,19 @@ import { Video, VideoStatus } from './entities/video.entity';
 import { generateShortCode } from './short-code.util';
 import { VideosQueueService } from './videos-queue.service';
 import {
-  ALLOWED_VIDEO_MIME_TYPES,
-  MAX_MULTIPART_PARTS,
-  MIME_TO_EXTENSION,
-} from './videos.constants';
+  discardDraftUpload,
+  draftUploadClaim,
+  isNoSuchUpload,
+  isObjectNotFound,
+} from './video-upload-session';
+import { MAX_MULTIPART_PARTS, videoFormatOf } from './videos.constants';
 
 const PG_UNIQUE_VIOLATION = '23505';
+const NOT_A_DRAFT_MESSAGE =
+  'Video upload was already completed or is no longer a draft';
+const OVERSIZE_REASON = 'Uploaded object exceeded maximum allowed size';
+const UPLOAD_GONE_REASON =
+  'The multipart upload no longer exists (expired or aborted); upload the video again';
 const MAX_SHORT_CODE_RETRIES = 5;
 
 function isPgUniqueViolationOnShortCode(err: unknown): boolean {
@@ -63,7 +70,6 @@ function isS3UploadPartsClientError(err: unknown): boolean {
       'InvalidPartOrder',
       'EntityTooSmall',
       'MalformedXML',
-      'NoSuchUpload',
     ].includes(code)
   );
 }
@@ -93,6 +99,8 @@ export interface CompleteUploadResult {
 
 @Injectable()
 export class VideosUploadService {
+  private readonly logger = new Logger(VideosUploadService.name);
+
   constructor(
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
@@ -107,7 +115,8 @@ export class VideosUploadService {
     userId: string,
     dto: InitiateUploadDto,
   ): Promise<InitiateUploadResult> {
-    if (!ALLOWED_VIDEO_MIME_TYPES.has(dto.mimeType)) {
+    const format = videoFormatOf(dto.mimeType);
+    if (!format) {
       throw new UnsupportedMediaTypeException(dto.mimeType);
     }
 
@@ -133,10 +142,9 @@ export class VideosUploadService {
       channel.id,
       dto,
     );
-    const ext = MIME_TO_EXTENSION[dto.mimeType] ?? 'mp4';
-    const storageKey = `videos/${channel.id}/${video.id}/original.${ext}`;
+    const storageKey = `videos/${channel.id}/${video.id}/original.${format.extension}`;
 
-    let uploadId: string;
+    let uploadId: string | undefined;
     try {
       uploadId = await this.storageService.createMultipartUpload(
         storageKey,
@@ -146,6 +154,9 @@ export class VideosUploadService {
       video.upload_id = uploadId;
       await this.videoRepository.save(video);
     } catch (err) {
+      if (uploadId) {
+        await this.abortUnrecordedUpload(storageKey, uploadId);
+      }
       await this.videoRepository.delete({ id: video.id });
       throw err;
     }
@@ -207,19 +218,46 @@ export class VideosUploadService {
       );
     }
 
-    // The conditional draft -> processing update is the lock: only one
-    // concurrent complete wins it, and the loser never reaches S3.
+    // The conditional draft -> processing update is the lock, on the same
+    // predicate an abort or the sweep claims (draftUploadClaim): only one of
+    // them owns the upload, and the losers never reach S3.
     const claim = await this.videoRepository.update(
-      { id: video.id, status: VideoStatus.DRAFT },
+      draftUploadClaim(video.id, video.upload_id!),
       { status: VideoStatus.PROCESSING },
     );
     if (claim.affected !== 1) {
-      throw new VideoInvalidStateException(
-        'Video upload was already completed or is no longer a draft',
-      );
+      throw new VideoInvalidStateException(NOT_A_DRAFT_MESSAGE);
     }
     const claimed = { id: video.id, status: VideoStatus.PROCESSING };
 
+    // Parts go straight to storage through presigned URLs, which cannot cap
+    // their size: sum what storage holds before it assembles anything.
+    let storedBytes: number | undefined;
+    try {
+      storedBytes = await this.sumStoredParts(video, parts);
+    } catch (err) {
+      if (!isNoSuchUpload(err)) {
+        await this.videoRepository.update(claimed, {
+          status: VideoStatus.DRAFT,
+        });
+        throw err;
+      }
+      // Already closed: the complete below reconciles it.
+    }
+    if (
+      storedBytes !== undefined &&
+      storedBytes > this.config.maxFileSizeBytes
+    ) {
+      await this.videoRepository.update(claimed, {
+        status: VideoStatus.FAILED,
+        upload_id: null,
+        processing_error: OVERSIZE_REASON,
+      });
+      await this.abortUnrecordedUpload(video.storage_key!, video.upload_id!);
+      throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
+    }
+
+    let uploadGone = false;
     try {
       await this.storageService.completeMultipartUpload(
         video.storage_key!,
@@ -227,16 +265,22 @@ export class VideosUploadService {
         parts,
       );
     } catch (err) {
-      // The multipart upload is still open, so the client can retry.
-      await this.videoRepository.update(claimed, {
-        status: VideoStatus.DRAFT,
-      });
-      if (isS3UploadPartsClientError(err)) {
-        throw new InvalidUploadPartsException(
-          'Storage rejected multipart upload completion parts',
-        );
+      if (!isNoSuchUpload(err)) {
+        // The multipart upload is still open, so the client can retry.
+        await this.videoRepository.update(claimed, {
+          status: VideoStatus.DRAFT,
+        });
+        if (isS3UploadPartsClientError(err)) {
+          throw new InvalidUploadPartsException(
+            'Storage rejected multipart upload completion parts',
+          );
+        }
+        throw err;
       }
-      throw err;
+      // Closed already: an earlier complete whose response was lost (the
+      // object then exists under the immutable key, checked below) or an
+      // upload that expired. Never back to a draft that cannot complete.
+      uploadGone = true;
     }
 
     // From here on the multipart upload is closed and cannot go back to
@@ -245,6 +289,14 @@ export class VideosUploadService {
     try {
       head = await this.storageService.headObject(video.storage_key!);
     } catch (err) {
+      if (uploadGone && isObjectNotFound(err)) {
+        await this.videoRepository.update(claimed, {
+          status: VideoStatus.FAILED,
+          upload_id: null,
+          processing_error: UPLOAD_GONE_REASON,
+        });
+        throw new VideoInvalidStateException(UPLOAD_GONE_REASON);
+      }
       await this.videoRepository.update(claimed, {
         status: VideoStatus.FAILED,
         upload_id: null,
@@ -261,9 +313,16 @@ export class VideosUploadService {
       await this.videoRepository.update(claimed, {
         status: VideoStatus.FAILED,
         upload_id: null,
-        processing_error: 'Uploaded object exceeded maximum allowed size',
+        processing_error: OVERSIZE_REASON,
       });
-      await this.storageService.deleteObject(video.storage_key!);
+      try {
+        await this.storageService.deleteObject(video.storage_key!);
+      } catch (err) {
+        // The client's error is the size; an orphaned object is only ops work.
+        this.logger.warn(
+          `Could not delete oversized object ${video.storage_key}: ${(err as Error).message}`,
+        );
+      }
       throw new UploadLimitExceededException(this.config.maxFileSizeBytes);
     }
 
@@ -276,9 +335,6 @@ export class VideosUploadService {
     try {
       jobId = await this.queueService.enqueueProcessVideo({
         videoId: video.id,
-        channelId: video.channel_id,
-        storageKey: video.storage_key!,
-        mimeType: video.mime_type,
       });
     } catch (err) {
       // Without a job nothing would ever move the video out of processing.
@@ -302,14 +358,44 @@ export class VideosUploadService {
 
   async abortUpload(userId: string, videoId: string): Promise<void> {
     const video = await this.requireOwnedDraftVideo(userId, videoId);
-    await this.storageService.abortMultipartUpload(
+    const discarded = await discardDraftUpload(
+      this.videoRepository,
+      this.storageService,
+      video,
+    );
+    if (!discarded) {
+      throw new VideoInvalidStateException(NOT_A_DRAFT_MESSAGE);
+    }
+  }
+
+  private async sumStoredParts(
+    video: Video,
+    parts: CompletedPartInput[],
+  ): Promise<number> {
+    const wanted = new Set(parts.map((p) => p.partNumber));
+    const stored = await this.storageService.listUploadedParts(
       video.storage_key!,
       video.upload_id!,
     );
-    await this.videoRepository.delete({
-      id: video.id,
-      status: VideoStatus.DRAFT,
-    });
+    return stored
+      .filter((p) => wanted.has(p.partNumber))
+      .reduce((total, p) => total + p.sizeBytes, 0);
+  }
+
+  // No row points at this upload any more (draft never recorded it, or it was
+  // just failed), so neither abort nor the sweep could find it later: abort
+  // it now, keeping the caller's original error.
+  private async abortUnrecordedUpload(
+    storageKey: string,
+    uploadId: string,
+  ): Promise<void> {
+    try {
+      await this.storageService.abortMultipartUpload(storageKey, uploadId);
+    } catch (err) {
+      this.logger.warn(
+        `Could not abort unrecorded upload ${uploadId} for ${storageKey}: ${(err as Error).message}`,
+      );
+    }
   }
 
   private async createDraftVideoWithUniqueShortCode(

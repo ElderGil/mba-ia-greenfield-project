@@ -3,9 +3,9 @@ kind: phase
 name: phase-03-videos
 test_specs_aware: true
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-11-16T21:27:52-0300"
-  docs/phases/phase-03-videos/library-refs.md: "2026-11-16T21:27:50-0300"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-16T21:27:05-0300"
+  docs/phases/phase-03-videos/context.md: "2026-11-20T21:02:59-0300"
+  docs/phases/phase-03-videos/library-refs.md: "2026-11-20T21:02:58-0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-20T21:00:44-0300"
 ---
 
 # Phase 03 — Upload e Processamento de Vídeos
@@ -42,7 +42,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 - `docker compose up -d` starts `db`, `mailpit`, `minio`, `redis`, `nestjs-api`, and `video-worker` using service names (`db`, `minio`, `redis`), never `localhost`.
 - `ffmpeg -version` and `ffprobe -version` succeed inside `nestjs-api` and `video-worker` containers.
-- Starting without required `S3_*` / `REDIS_*` vars fails fast via Joi validation.
+- Starting without required `S3_*` / `REDIS_*` vars fails fast via Joi validation. _Revised 2026-11-20 (round 5): only `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` are required (no fallback in `storage.config` either); `REDIS_*` default to the compose `redis` service._
 
 ---
 
@@ -80,7 +80,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Technical actions:**
 
-1. Extend `src/common/exceptions/domain.exception.ts` with all Phase 03 subclasses listed in `### Error Catalog` (`ChannelNotFoundException`, `VideoNotFoundException`, `VideoAccessDeniedException`, `VideoInvalidStateException`, `VideoNotReadyException`, `UploadLimitExceededException`, `UnsupportedMediaTypeException`, `InvalidUploadPartsException`, `InvalidRangeException`).
+1. Extend `src/common/exceptions/domain.exception.ts` with all Phase 03 subclasses listed in `### Error Catalog` (`ChannelNotFoundException`, `VideoNotFoundException`, `VideoAccessDeniedException`, `VideoInvalidStateException`, `VideoNotReadyException`, `UploadLimitExceededException`, `UnsupportedMediaTypeException`, `InvalidUploadPartsException`, `InvalidRangeException`). _Revised 2026-11-20 (final review): `VideoNotReadyException` was removed (public routes answer `404 VideoNotFoundException` for non-ready videos); `TooManyOpenUploadsException` was added._
 2. Create `src/storage/s3-storage.service.ts` injecting `storageConfig.KEY` (`S3Client` with `forcePathStyle: cfg.forcePathStyle`) implementing: `ensureBucket()`, `createMultipartUpload()`, `getPresignedPartUrl()`, `completeMultipartUpload()`, `abortMultipartUpload()`, `headObject()`, `putObject()`, `getObjectStream()` (with optional `Range`), `getPresignedGetUrl()`, and `deleteObject()`.
 3. Ensure `S3StorageService.onModuleInit()` calls `ensureBucket()` (idempotent `HeadBucketCommand` → `CreateBucketCommand` if missing).
 4. Create `src/storage/storage.module.ts` exporting `S3StorageService`.
@@ -224,9 +224,9 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 1. Create `src/videos/videos.service.ts` with:
    - `getVideoByIdForOwner(userId, videoId)` and `listChannelVideos(userId)` (ownership-scoped via `ChannelsService.findByUserId`).
-   - `getReadyVideoByShortCode(shortCode)`: finds video by `short_code` (throws `VideoNotFoundException` if missing; throws `VideoNotReadyException` (`409`) if `status !== 'ready'`).
+   - `getReadyVideoByShortCode(shortCode)`: finds video by `short_code` (throws `VideoNotFoundException` if missing; throws `VideoNotReadyException` (`409`) if `status !== 'ready'`). _Revised 2026-11-20 (final review): `404 VideoNotFoundException` for any non-ready video, so a shortCode never reveals an unpublished one._
    - `parseByteRange(rangeHeader: string, totalSize: number)`: strict RFC 9110 single-range parser (`bytes=start-end`, `bytes=start-`, `bytes=-suffix`) throwing `InvalidRangeException` (`416`) on unsatisfiable/malformed ranges.
-   - `getVideoStream(shortCode, rangeHeader?)`: calls `S3StorageService.getObjectStream` with resolved byte range, returning `{ stream, contentType, contentLength, totalSize, isPartial, contentRange }`.
+   - `getVideoStream(shortCode, rangeHeader?)`: calls `S3StorageService.getObjectStream` with resolved byte range, returning `{ stream, contentType, contentLength, totalSize, isPartial, contentRange }`. _Revised 2026-11-20 (final review, round 5): returns a lazy `open()` plus `etag`, `contentType`, `contentLength`, `isPartial`, `contentRange`; the Range to honour comes from `selectRange()` in the HTTP layer, after conditionals._
    - `getVideoDownload(shortCode)` and `getThumbnailStream(shortCode)`: streams full video with sanitized attachment filename and JPEG thumbnail stream.
 
 **Tests:**
@@ -282,8 +282,8 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 **Technical actions:**
 
 1. Create `test/videos.e2e-spec.ts` booting the full `AppModule` + an in-test `VideoProcessingProcessor` (or `WorkerModule` context) connected to real Docker `db`, `minio`, and `redis`, using a real small MP4 generated via `ffmpeg` at test setup.
-2. Cover the full happy path: register/confirm/login → `POST /videos/uploads/initiate` (assert `201`, `status: 'draft'`, unique 11-char `shortCode`) → `POST /videos/:id/uploads/parts` (assert presigned URL returned) → HTTP `PUT` part bytes directly to MinIO presigned URL → `POST /videos/:id/uploads/complete` (assert `202` / `processing`) → wait for worker completion → `GET /videos/:id/status` (`ready`, `durationSeconds > 0`, `width`, `height`, `codec`, `thumbnailKey`) → anonymous `GET /videos/:shortCode` (`200`), `GET /videos/:shortCode/thumbnail` (`200 image/jpeg`), `GET /videos/:shortCode/stream` with `Range: bytes=0-511` (`206 Partial Content`, `Accept-Ranges: bytes`, `Content-Range`, exact 512 bytes), `GET /videos/:shortCode/download` (`200`, `Content-Disposition: attachment`).
-3. Cover security & failure edge cases: unauthenticated upload rejected (`401`), cross-user upload/complete/status rejected (`403`), >10 GiB upload initiation rejected (`413`), unsupported MIME rejected (`415`), invalid byte range rejected (`416`), streaming a `draft`/`processing` video rejected (`409`), upload abort cleanup, and corrupt file transitioning to `failed`.
+2. Cover the full happy path: register/confirm/login → `POST /videos/uploads/initiate` (assert `201`, `status: 'draft'`, unique 11-char `shortCode`) → `POST /videos/:id/uploads/parts` (assert presigned URL returned) → HTTP `PUT` part bytes directly to MinIO presigned URL → `POST /videos/:id/uploads/complete` (assert `202` / `processing`) → wait for worker completion → `GET /videos/:id/status` (`ready`, `durationSeconds > 0`, `width`, `height`, `codec`, `thumbnailKey` — _revised 2026-11-20 (final review): `thumbnailUrl`_) → anonymous `GET /videos/:shortCode` (`200`), `GET /videos/:shortCode/thumbnail` (`200 image/jpeg`), `GET /videos/:shortCode/stream` with `Range: bytes=0-511` (`206 Partial Content`, `Accept-Ranges: bytes`, `Content-Range`, exact 512 bytes), `GET /videos/:shortCode/download` (`200`, `Content-Disposition: attachment`).
+3. Cover security & failure edge cases: unauthenticated upload rejected (`401`), cross-user upload/complete/status rejected (`403`), >10 GiB upload initiation rejected (`413`), unsupported MIME rejected (`415`), invalid byte range rejected (`416`), streaming a `draft`/`processing` video rejected (`409` — _revised 2026-11-20 (final review): `404`_), upload abort cleanup, and corrupt file transitioning to `failed`.
 
 **Tests:**
 
@@ -502,6 +502,7 @@ Lets a client that lost its ETags (reload, crash) resume the upload, as `project
 - Binary video stream piped directly from S3/MinIO
 - Response headers: `Accept-Ranges: bytes`, `Content-Type`, `Content-Length`, `ETag`, `Cache-Control: no-cache`, and on `206`: `Content-Range: bytes start-end/total`
 - `HEAD` returns the same headers without reading storage; `If-None-Match` matching the `ETag` returns `304` (_Revised 2026-11-20 (final review)_)
+- Conditionals are evaluated before `Range` (RFC 9110): matching `If-None-Match` → `304` even with an unsatisfiable `Range`; `If-Range` that is not the current strong `ETag` → full `200`; `HEAD`, unknown units and multiple ranges get the full representation (`200`) (_Revised 2026-11-20 (round 5)_)
 
 **Error responses:**
 - `404 VIDEO_NOT_FOUND` (also when not `ready`)
@@ -616,15 +617,15 @@ Linearized implementation order: `SI-03.1` → `SI-03.2`, `SI-03.3`, `SI-03.4` �
 
 ## Deliverables
 
-- [ ] `technical-decisions-phase-03-videos.md` (`status: decided`) and `docs/phases/phase-03-videos/` (`context.md`, `validation.md` `clean`, `library-refs.md`, `phase-03-videos.md`, `progress.md`)
-- [ ] `minio`, `redis`, and `video-worker` services running cleanly in `nestjs-project/compose.yaml` (using service-name networking)
-- [ ] TypeORM migration creating `videos` table linked to `channels` (`npm run migration:run` + bidirectional migration test green)
-- [ ] Multipart presigned upload supporting up to 10 GiB without buffering bytes in API, creating `draft` record at initiation
-- [ ] Dedicated `video-worker` extracting `durationSeconds`, `width`, `height`, `codec`, generating JPEG thumbnail via `ffmpeg`/`ffprobe`, and updating `ready` / `failed`
-- [ ] Conflict-free 11-character `short_code` unique URLs
-- [ ] HTTP Byte-Range `206 Partial Content` streaming, attachment download, and JPEG thumbnail endpoints (`@Public()` when `ready`)
-- [ ] OpenAPI spec updated (`nestjs-project/openapi.json`)
-- [ ] Unit + real-infra integration (`npm test -- --runInBand`) and E2E (`npm run test:e2e`) passing inside container
-- [ ] `npx tsc --noEmit` exits 0, `npm run lint` passes, `npm run build` succeeds inside container
-- [ ] `CLAUDE.md`, `GEMINI.md`, `nestjs-project/CLAUDE.md`, `nestjs-project/GEMINI.md`, `docs/diagrams/software-arch.mermaid`, and `README.md` updated and consistent with code
-- [ ] Git Flow respected (`feature/phase-03-videos` from `dev` → `dev` → `main` via merge, zero direct commits on `main`)
+- [x] `technical-decisions-phase-03-videos.md` (`status: decided`) and `docs/phases/phase-03-videos/` (`context.md`, `validation.md` `clean`, `library-refs.md`, `phase-03-videos.md`, `progress.md`)
+- [x] `minio`, `redis`, and `video-worker` services running cleanly in `nestjs-project/compose.yaml` (using service-name networking)
+- [x] TypeORM migration creating `videos` table linked to `channels` (`npm run migration:run` + bidirectional migration test green)
+- [x] Multipart presigned upload supporting up to 10 GiB without buffering bytes in API, creating `draft` record at initiation
+- [x] Dedicated `video-worker` extracting `durationSeconds`, `width`, `height`, `codec`, generating JPEG thumbnail via `ffmpeg`/`ffprobe`, and updating `ready` / `failed`
+- [x] Conflict-free 11-character `short_code` unique URLs
+- [x] HTTP Byte-Range `206 Partial Content` streaming, attachment download, and JPEG thumbnail endpoints (`@Public()` when `ready`)
+- [x] OpenAPI spec updated (`nestjs-project/openapi.json`)
+- [x] Unit + real-infra integration (`npm test -- --runInBand`) and E2E (`npm run test:e2e`) passing inside container
+- [x] `npx tsc --noEmit` exits 0, `npm run lint` passes, `npm run build` succeeds inside container
+- [x] `CLAUDE.md`, `GEMINI.md`, `nestjs-project/CLAUDE.md`, `nestjs-project/GEMINI.md`, `docs/diagrams/software-arch.mermaid`, and `README.md` updated and consistent with code
+- [x] Git Flow respected (`feature/phase-03-videos` from `dev` → `dev` → `main` via merge, zero direct commits on `main`)

@@ -83,6 +83,8 @@ _Subprojects in scope:_
 
 > **Revision (2026-11-20, final review):** same decision, three parameters added. (1) Resume: `GET /videos/:id/uploads/parts` returns the parts already stored (S3 `ListParts`), so a client that lost its ETags can finish the upload (`project-plan.md` §4). (2) Limits: `POST /videos/uploads/initiate` is throttled (10/min) and a channel may hold `VIDEO_MAX_OPEN_DRAFTS` (5) open drafts (`409 TOO_MANY_OPEN_UPLOADS`), because each open draft holds a multipart upload. (3) Complete accepts up to 10 000 parts (JSON body limit 1 MB). Presigned part URLs are signed without a checksum (`requestChecksumCalculation: WHEN_REQUIRED`), which real S3 requires.
 
+> **Revision (2026-11-20, round 5):** same decision. Complete, abort and the sweep claim a draft with one conditional UPDATE on `(id, draft, upload_id)` before any destructive storage call, so exactly one of them owns the multipart upload; a complete that gets `NoSuchUpload` checks the object under its immutable key (an earlier complete whose response was lost) before failing. Before assembly, complete sums the stored parts (`ListParts`) and aborts above the limit; the presigned `PUT` itself still cannot cap a part (S3 accepts up to 5 GiB per part). A real 10 GiB upload (1 024 parts of 10 MiB) was run end to end.
+
 **Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
@@ -143,6 +145,8 @@ _Subprojects in scope:_
 
 > **Revision (2026-11-20, final review):** same lifecycle; the states that had no way out now have one. A maintenance sweep in the worker (BullMQ job scheduler, every 15 min) deletes drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) after aborting their multipart upload, and moves to `failed` the `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job (API stopped between claim and enqueue, job lost). A job BullMQ fails with `UnrecoverableError` (stalled past `maxStalledCount`) is final even with attempts left.
 
+> **Revision (2026-11-20, round 5):** same lifecycle. The worker writes `ready`/`failed` only from `processing` and skips a job whose video already left it, so a re-delivered job cannot overwrite a final state; the job carries only `videoId`. The sweep pages through every eligible row (keyset by id) instead of the 100 oldest.
+
 **Libraries:** —
 
 ---
@@ -178,6 +182,8 @@ _Subprojects in scope:_
 **Decision:** A (Dedicated `video-worker` container + native `ffmpeg`/`ffprobe` via `child_process`, extracting `durationSeconds`, `width`, `height`, `codec`, and JPEG thumbnail at 1s with 0s fallback; _revised 2026-11-20: `sizeBytes` comes from the API's `HeadObject` and `mimeType` from initiate, the worker extracts neither; the thumbnail seek is `min(1s, duration/2)` with first-frame fallback, and the demuxer is forced from the stored MIME_)
 
 > **Revision (2026-11-20, final review):** same topology. ffprobe/ffmpeg run with the demuxer forced from the stored MIME (`mov` for mp4/quicktime, `matroska` for webm/mkv) and a protocol whitelist, so images are rejected and a playlist disguised as video cannot make the worker fetch URLs (SSRF). The thumbnail is taken at `min(1s, duration/2)` with a first-frame fallback (a 1.0 s clip has no frame at 1 s). Errors are stored as `"<tool> failed: <stderr>"` with URLs redacted. The container runs `node` directly so SIGTERM reaches Nest and BullMQ drains the active job.
+
+> **Revision (2026-11-20, round 5):** same topology. The worker reads only through the presigned GET URL; the `/tmp` fallback for non-seekable input above was never needed or built. ffprobe and ffmpeg select `V:0`, the first video track that is not an attached picture, so an audio file whose cover art is listed as a video stream is rejected and the thumbnail comes from the track the metadata describes.
 
 **Libraries:** —
 
@@ -248,6 +254,8 @@ _Subprojects in scope:_
 **Decision:** A (API Byte-Range `206` stream proxy + attachment download; `@Public()` playback/thumbnail/download when `status === 'ready'`, JWT + channel ownership for upload/status/management)
 
 > **Revision (2026-11-20, final review):** same delivery strategy. Public routes answer `404` for videos that are not `ready` (was `409`). Media responses answer `HEAD` without reading storage, send a strong `ETag` with `Cache-Control: no-cache` and `304` on `If-None-Match`, put `Content-Range: bytes */size` on `416`, and use an RFC 6266 `Content-Disposition` (ASCII fallback + UTF-8 `filename*`). Storage streams are opened lazily and piped with `pipeline()`.
+
+> **Revision (2026-11-20, round 5):** same delivery strategy. Conditionals are evaluated before `Range` (RFC 9110): matching `If-None-Match` → `304`, `If-Range` that is not the current strong ETag → full `200`, `HEAD` ignores `Range`. The dual endpoint Option B lacked now exists for upload presigns (`S3_PUBLIC_ENDPOINT`, TD-02); Option B stays rejected because the proxy keeps reads private and checks `ready` on every request.
 
 **Libraries:** @aws-sdk/client-s3
 

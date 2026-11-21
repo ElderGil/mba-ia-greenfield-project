@@ -36,7 +36,7 @@ export class VideoProcessingProcessor
   }
 
   async process(job: Job<VideoProcessingJobData>): Promise<void> {
-    const { videoId, channelId, storageKey } = job.data;
+    const { videoId } = job.data;
     const video = await this.videoRepository.findOne({
       where: { id: videoId },
     });
@@ -48,8 +48,18 @@ export class VideoProcessingProcessor
       return;
     }
 
+    // A job can run again after its video reached a final state (a stalled
+    // job, a lost completion, or a video the sweep already failed): the row
+    // wins, and nothing is redone or overwritten.
+    if (video.status !== VideoStatus.PROCESSING || !video.storage_key) {
+      this.logger.warn(
+        `Video ${videoId} is ${video.status}, not processing; skipping job ${job.id}`,
+      );
+      return;
+    }
+
     const inputUrl = await this.storageService.getPresignedGetUrl(
-      storageKey,
+      video.storage_key,
       900,
     );
     // The MIME stored at initiate drives the demuxer (see MediaProcessorService).
@@ -63,15 +73,15 @@ export class VideoProcessingProcessor
       video.mime_type,
     );
 
-    const thumbnailKey = `thumbnails/${channelId}/${videoId}/thumb.jpg`;
+    const thumbnailKey = `thumbnails/${video.channel_id}/${video.id}/thumb.jpg`;
     await this.storageService.putObject(
       thumbnailKey,
       thumbnailBuffer,
       'image/jpeg',
     );
 
-    await this.videoRepository.update(
-      { id: videoId },
+    const done = await this.videoRepository.update(
+      { id: videoId, status: VideoStatus.PROCESSING },
       {
         status: VideoStatus.READY,
         thumbnail_key: thumbnailKey,
@@ -82,6 +92,11 @@ export class VideoProcessingProcessor
         processing_error: null,
       },
     );
+    if (done.affected !== 1) {
+      this.logger.warn(
+        `Video ${videoId} left processing while job ${job.id} ran; result discarded`,
+      );
+    }
   }
 
   @OnWorkerEvent('failed')
@@ -108,13 +123,23 @@ export class VideoProcessingProcessor
       `Job ${job.id} exhausted retries for video ${job.data.videoId}: ${error.message}`,
     );
 
-    await this.videoRepository.update(
-      { id: job.data.videoId },
-      {
-        status: VideoStatus.FAILED,
-        // Defence in depth: no error path may persist a signed URL.
-        processing_error: redactUrls(error.message).slice(0, 1000),
-      },
-    );
+    // Conditional: a re-delivered job failing after the video became ready
+    // must not take it down. The listener's promise is ignored by the worker
+    // (EventEmitter), so a rejection here would be unhandled and crash the
+    // process; the maintenance sweep fails the video later instead.
+    try {
+      await this.videoRepository.update(
+        { id: job.data.videoId, status: VideoStatus.PROCESSING },
+        {
+          status: VideoStatus.FAILED,
+          // Defence in depth: no error path may persist a signed URL.
+          processing_error: redactUrls(error.message).slice(0, 1000),
+        },
+      );
+    } catch (err) {
+      this.logger.error(
+        `Could not mark video ${job.data.videoId} failed (${(err as Error).message}); the maintenance sweep will`,
+      );
+    }
   }
 }

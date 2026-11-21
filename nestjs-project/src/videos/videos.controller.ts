@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -38,8 +37,28 @@ import {
   VideoOwnerResponseDto,
   VideoPublicResponseDto,
 } from './dto/video-response.dto';
-import { buildContentDisposition, sendMedia } from './videos-http.util';
-import { INITIATE_UPLOAD_THROTTLE } from './videos.constants';
+import {
+  buildContentDisposition,
+  selectRange,
+  sendMedia,
+} from './videos-http.util';
+import { INITIATE_UPLOAD_THROTTLE, VIDEO_MIME_TYPES } from './videos.constants';
+
+const INVALID_ID_RESPONSE = {
+  status: 400,
+  description: 'Invalid video id (not a UUID)',
+  schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+};
+
+// Media bodies are raw bytes in the stored type, not JSON.
+function binaryBody(types: readonly string[]): Record<string, object> {
+  return Object.fromEntries(
+    types.map((type) => [
+      type,
+      { schema: { type: 'string', format: 'binary' } },
+    ]),
+  );
+}
 import { VideosUploadService } from './videos-upload.service';
 import { VideosService } from './videos.service';
 
@@ -161,6 +180,7 @@ export class VideosController {
   }
 
   @Get(':id/uploads/parts')
+  @ApiResponse(INVALID_ID_RESPONSE)
   @ApiBearerAuth('access-token')
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOperation({
@@ -257,6 +277,7 @@ export class VideosController {
   }
 
   @Post(':id/uploads/abort')
+  @ApiResponse(INVALID_ID_RESPONSE)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth('access-token')
   @ApiParam({ name: 'id', format: 'uuid' })
@@ -318,6 +339,7 @@ export class VideosController {
   }
 
   @Get(':id/status')
+  @ApiResponse(INVALID_ID_RESPONSE)
   @ApiBearerAuth('access-token')
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOperation({
@@ -382,15 +404,29 @@ export class VideosController {
   @ApiOperation({
     summary: 'Stream video content with HTTP Byte-Range support',
     description:
-      'Streams a ready video via 206 Partial Content when a Range header is supplied, or 200 OK otherwise.',
+      'Streams a ready video via 206 Partial Content for a single byte range on GET, or 200 OK otherwise. Conditionals are evaluated first (RFC 9110): a matching If-None-Match answers 304, an If-Range that is not the current ETag gets the full file. HEAD, unknown range units and multiple ranges get the full representation.',
   })
   @ApiHeader({
     name: 'Range',
     required: false,
-    description: 'Byte range (e.g., bytes=0-1048575)',
+    description: 'Single byte range (e.g., bytes=0-1048575)',
   })
-  @ApiResponse({ status: 206, description: 'Partial video byte stream' })
-  @ApiResponse({ status: 200, description: 'Full video byte stream' })
+  @ApiHeader({
+    name: 'If-Range',
+    required: false,
+    description:
+      'Serve the range only if the ETag still matches; otherwise the full file',
+  })
+  @ApiResponse({
+    status: 206,
+    description: 'Partial video byte stream',
+    content: binaryBody(VIDEO_MIME_TYPES),
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Full video byte stream',
+    content: binaryBody(VIDEO_MIME_TYPES),
+  })
   @ApiResponse({
     status: 304,
     description: 'Not modified (If-None-Match matched the ETag)',
@@ -407,11 +443,12 @@ export class VideosController {
   })
   async streamVideo(
     @Param('shortCode') shortCode: string,
-    @Headers('range') range: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const payload = await this.videosService.getVideoStream(shortCode, range);
+    const payload = await this.videosService.getVideoStream(shortCode, (etag) =>
+      selectRange(req, etag),
+    );
     const headers: Record<string, string> = {
       'Accept-Ranges': 'bytes',
       'Content-Type': payload.contentType,
@@ -440,7 +477,11 @@ export class VideosController {
     description:
       'Streams the full video file with Content-Disposition: attachment.',
   })
-  @ApiResponse({ status: 200, description: 'Video file download stream' })
+  @ApiResponse({
+    status: 200,
+    description: 'Video file download stream',
+    content: binaryBody(VIDEO_MIME_TYPES),
+  })
   @ApiResponse({
     status: 304,
     description: 'Not modified (If-None-Match matched the ETag)',
@@ -480,7 +521,11 @@ export class VideosController {
     description:
       'Streams the JPEG thumbnail extracted from the video frame during background processing.',
   })
-  @ApiResponse({ status: 200, description: 'JPEG thumbnail image' })
+  @ApiResponse({
+    status: 200,
+    description: 'JPEG thumbnail image',
+    content: binaryBody(['image/jpeg']),
+  })
   @ApiResponse({
     status: 304,
     description: 'Not modified (If-None-Match matched the ETag)',

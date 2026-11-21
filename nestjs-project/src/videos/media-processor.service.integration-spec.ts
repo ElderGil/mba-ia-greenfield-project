@@ -170,6 +170,117 @@ describe('MediaProcessorService (integration with ffmpeg/ffprobe)', () => {
     20000,
   );
 
+  describe('cover art (attached pictures)', () => {
+    let songPath: string;
+    let coveredVideoPath: string;
+    let coverPath: string;
+
+    beforeAll(async () => {
+      coverPath = await makeTemp('png');
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=red:size=64x64',
+        '-frames:v',
+        '1',
+        coverPath,
+      ]);
+      // ffprobe lists the cover of an audio file as a "video" stream.
+      songPath = await makeTemp('mp4');
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=duration=3',
+        '-i',
+        coverPath,
+        '-map',
+        '0',
+        '-map',
+        '1',
+        '-c:a',
+        'aac',
+        '-c:v:0',
+        'png',
+        '-disposition:v:0',
+        'attached_pic',
+        songPath,
+      ]);
+      coveredVideoPath = await makeTemp('mp4');
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=duration=2:size=320x240:rate=10',
+        '-i',
+        coverPath,
+        '-map',
+        '0',
+        '-map',
+        '1',
+        '-c:v:0',
+        'libx264',
+        '-pix_fmt:v:0',
+        'yuv420p',
+        '-c:v:1',
+        'png',
+        '-disposition:v:1',
+        'attached_pic',
+        coveredVideoPath,
+      ]);
+    });
+
+    afterAll(async () => {
+      for (const file of [songPath, coveredVideoPath, coverPath]) {
+        await fs.unlink(file).catch(() => undefined);
+      }
+    });
+
+    it('rejects an audio file whose only "video" stream is its cover art', async () => {
+      await expect(service.probeVideo(songPath, 'video/mp4')).rejects.toThrow(
+        /no video stream/i,
+      );
+      await expect(
+        service.generateThumbnail(songPath, 3, 'video/mp4'),
+      ).rejects.toThrow(/ffmpeg failed/);
+    });
+
+    it('describes and thumbnails the real video track of a file with cover art', async () => {
+      const metadata = await service.probeVideo(coveredVideoPath, 'video/mp4');
+      expect(metadata).toMatchObject({
+        width: 320,
+        height: 240,
+        codec: 'h264',
+      });
+
+      const thumb = await service.generateThumbnail(
+        coveredVideoPath,
+        metadata.durationSeconds,
+        'video/mp4',
+      );
+      const thumbPath = await makeTemp('jpg');
+      try {
+        await fs.writeFile(thumbPath, thumb);
+        const { stdout } = await execFileAsync('ffprobe', [
+          '-v',
+          'error',
+          '-show_entries',
+          'stream=width,height',
+          '-of',
+          'csv=p=0',
+          thumbPath,
+        ]);
+        expect(stdout.trim()).toBe('320,240');
+      } finally {
+        await fs.unlink(thumbPath).catch(() => undefined);
+      }
+    });
+  });
+
   it('rejects an image uploaded as video/mp4', async () => {
     const png = await makeTemp('png');
     await execFileAsync('ffmpeg', [

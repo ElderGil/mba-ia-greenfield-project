@@ -435,17 +435,69 @@ describe('Videos (e2e)', () => {
           String(sampleMp4.length),
         );
       }
+      // RFC 9110 §14.2: range handling is defined for GET only.
       const rangedHead = await request(app.getHttpServer())
         .head(`/videos/${shortCode}/stream`)
         .set('Range', 'bytes=0-99')
-        .expect(206);
-      expect(rangedHead.headers['content-range']).toBe(
-        `bytes 0-99/${sampleMp4.length}`,
+        .expect(200);
+      expect(rangedHead.headers['content-range']).toBeUndefined();
+      expect(rangedHead.headers['content-length']).toBe(
+        String(sampleMp4.length),
       );
       expect(getObject).not.toHaveBeenCalled();
     } finally {
       getObject.mockRestore();
     }
+  }, 30000);
+
+  it('evaluates HTTP conditionals before Range on the stream (RFC 9110)', async () => {
+    const { accessToken } = await registerConfirmAndLogin('conditionals');
+    const { shortCode } = await uploadReadyVideo(accessToken, 'cond.mp4');
+    const url = `/videos/${shortCode}/stream`;
+    const binary = (
+      res: request.Response,
+      cb: (err: Error | null, body: Buffer) => void,
+    ) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    };
+    const full = await request(app.getHttpServer()).get(url).expect(200);
+    const etag: string = full.headers['etag'];
+
+    // A matching If-None-Match answers 304 even with an unsatisfiable Range.
+    await request(app.getHttpServer())
+      .get(url)
+      .set('If-None-Match', etag)
+      .set('Range', `bytes=${sampleMp4.length + 100}-`)
+      .expect(304);
+
+    // If-Range for a stale representation: send the whole current one.
+    const stale = await request(app.getHttpServer())
+      .get(url)
+      .set('If-Range', '"stale-etag"')
+      .set('Range', 'bytes=0-99')
+      .buffer(true)
+      .parse(binary)
+      .expect(200);
+    expect(stale.headers['content-range']).toBeUndefined();
+    expect(Buffer.compare(stale.body as Buffer, sampleMp4)).toBe(0);
+
+    // If-Range matching the current ETag: the range is served.
+    const fresh = await request(app.getHttpServer())
+      .get(url)
+      .set('If-Range', etag)
+      .set('Range', 'bytes=0-99')
+      .expect(206);
+    expect(fresh.headers['content-range']).toBe(
+      `bytes 0-99/${sampleMp4.length}`,
+    );
+
+    // An unknown range unit is ignored, not rejected.
+    await request(app.getHttpServer())
+      .get(url)
+      .set('Range', 'items=0-1')
+      .expect(200);
   }, 30000);
 
   it('caps open drafts per channel and rate-limits upload initiation', async () => {
