@@ -36,7 +36,7 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `video-worker` — NestJS standalone BullMQ worker (`src/worker.main.ts` / `WorkerModule`) with FFmpeg/ffprobe; also runs the maintenance sweep. Waits for `node_modules` on a fresh clone, then `exec`s `node` (no `npm run` in between) so `docker compose stop` delivers SIGTERM to Nest
-- `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube` (the test suites create and use `streamtube_test`)
 - `mailpit` — Mailpit SMTP `1025`, Web UI `8025`
 - `minio` — S3-compatible object storage (`pgsty/silo`), API port `9000`, Console port `9001`
 - `redis` — Redis 7 (BullMQ queue backend), port `6379`
@@ -68,10 +68,10 @@ docker compose down
 npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
-npm run start:worker:dev                 # Run BullMQ FFmpeg video worker (dev)
+npm run start:worker:dev                 # Run BullMQ FFmpeg video worker (dev; the compose video-worker already runs one)
 npm run start:worker                     # Run compiled BullMQ FFmpeg video worker
 
-npm test                                 # Unit tests
+npm test                                 # Unit + integration tests (test database, real infra)
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
 npm run test:e2e                         # End-to-end tests (serial: maxWorkers 1)
@@ -197,14 +197,14 @@ Public routes answer `404 VIDEO_NOT_FOUND` for anything not `ready`, so a shortC
 - One claim rule for leaving a draft (`video-upload-session.ts`): complete, abort and the sweep all claim the row with a conditional UPDATE on `(id, draft, upload_id)` (`draftUploadClaim`) before any destructive S3 call, so exactly one of them owns the upload. A discard detaches `upload_id`, aborts, then deletes; if the abort fails the `upload_id` is put back. A complete that gets `NoSuchUpload` checks the object: present (an earlier complete whose response was lost) → it continues; absent (expired/aborted) → `failed`, `409`.
 - Queue: BullMQ `video-processing`, job `process-video`, id `process-video-{videoId}` (`processVideoJobId`), 3 attempts, exponential backoff. An `UnrecoverableError` (e.g. a stalled job) is final even with attempts left. The payload is `{ videoId }` only (older jobs' extra fields are ignored): the worker reads key, channel and MIME from the row, skips a video that is no longer `processing`, and writes `ready`/`failed` only from `processing`, so a re-delivered job never overwrites a final state. A database error in the `failed` listener is logged instead of crashing the worker; the sweep fails the video later.
 - Worker: ffprobe/ffmpeg read the original through a presigned GET; the demuxer is forced from the stored MIME (`mov` for mp4/quicktime, `matroska` for webm/mkv) with a protocol whitelist, so images and disguised playlists are rejected and no URL inside the file is fetched. Both tools use the first video track that is not cover art (`V:0`), so an audio file with a cover is rejected and the thumbnail comes from the track the metadata describes. Tool errors are stored as `"<tool> failed: <stderr>"` with every URL redacted.
-- Maintenance sweep (BullMQ scheduler `video-maintenance-sweep`, every 15 min, keeps the last 100 completed/failed sweep jobs; at-least-once, every write conditional): aborts and deletes drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) and fails `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job.
+- Maintenance sweep (BullMQ scheduler `video-maintenance-sweep`, every 15 min, keeps the last 100 completed/failed sweep jobs; at-least-once, every write conditional): pages through every eligible row (keyset by id) to abort and delete drafts older than `VIDEO_DRAFT_TTL_HOURS` (24) and to fail `processing` videos idle for `VIDEO_PROCESSING_STUCK_MINUTES` (30) that have no live job.
 
 ### Storage and limits
 
 - Bucket `streamtube-media` (private): `videos/{channelId}/{videoId}/original.{ext}`, `thumbnails/{channelId}/{videoId}/thumb.jpg`. Keys are built only from UUIDs and the MIME allowlist.
-- MIME allowlist: `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`, defined once in `VIDEO_FORMATS` (`videos.constants.ts`) with each type's storage extension and worker demuxer. Max 10 GiB (`VIDEO_MAX_SIZE_BYTES`), part size 10 MiB (`VIDEO_UPLOAD_PART_SIZE_BYTES`, ≥ 5 MiB), up to 10 000 parts (JSON body limit 1 MB in `main.ts`), presigned URLs valid `VIDEO_PRESIGNED_URL_EXPIRES_IN` (900 s).
+- MIME allowlist: `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`, defined once in `VIDEO_FORMATS` (`videos.constants.ts`) with each type's storage extension and worker demuxer. Max 10 GiB (`VIDEO_MAX_SIZE_BYTES`), part size 10 MiB (`VIDEO_UPLOAD_PART_SIZE_BYTES`, ≥ 5 MiB), up to 10 000 parts (JSON body limit 1 MB in `main.ts`), presigned URLs valid `VIDEO_PRESIGNED_URL_EXPIRES_IN` (900 s, at most 7 days). Before assembly, `complete` sums the stored parts; the presigned `PUT` itself cannot cap a part's size.
 - `S3_PUBLIC_ENDPOINT`: host used in presigned part URLs. Leave empty for the test suites; set `http://localhost:9000` only to upload from the host. The presign client signs no checksum (`requestChecksumCalculation: WHEN_REQUIRED`), which real S3 needs.
-- Other env: `S3_*` (endpoint, region, bucket, credentials, path style), `REDIS_*`, `QUEUE_PREFIX` (default `bull`). See `.env.example`.
+- Other env: `S3_*` (endpoint, region, bucket, credentials — required, no fallback — path style), `REDIS_*`, `QUEUE_PREFIX` (default `bull`). See `.env.example`.
 
 ## Code Conventions
 
