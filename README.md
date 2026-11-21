@@ -310,6 +310,17 @@ Depois da entrega, o código passou por revisão em par (construtor e auditor co
 
 Achados, decisões e o que ficou de fora estão no [progress.md](./docs/phases/phase-03-videos/progress.md).
 
+### Dúvidas sobre a fundação herdada do template
+
+**Guia de testes.** A skill `testing-guide-nestjs-project` do template (`.claude/skills/` e a cópia em `.agents/skills/`) orienta montar o DataSource de teste com `synchronize: true` e `database: process.env.DB_DATABASE ?? 'streamtube'`. Dois problemas:
+
+- **Testes no banco de desenvolvimento (antipadrão).** `DB_DATABASE` não existe no `.env.example` nem na config (a aplicação lê `DB_NAME`), então o fallback sempre cai no banco `streamtube` de dev, e a limpeza entre testes apaga os dados de quem está desenvolvendo. O helper de teste do template seguia esse padrão; a revisão externa da rodada 5 viu `npm test` apagar dados e deixar migration pendente.
+- **`synchronize` em teste (contradição com a rule).** A rule `typeorm-migrations.md` proíbe `synchronize` "in any environment". Além disso, com `synchronize` o teste valida o schema gerado das entidades, não o das migrations: uma migration faltando passa na suíte e quebra no deploy.
+
+Nesta fase o código passou a seguir a rule: banco `streamtube_test` próprio, schema aplicado pelas migrations no `globalSetup` do Jest e limpeza que recusa banco sem sufixo `_test`. A skill não foi alterada por ser parte da fundação do template; o trecho de storage ("filesystem local") e o de fila ("tecnologia a definir") também ficaram de antes das Fases 02 e 03. **Dúvida:** o padrão da skill era intencional para simplificar os testes, ou ela deveria ser regenerada (`generate-test-guide`) com o setup atual?
+
+**Outros resíduos, fora do escopo desta fase e mantidos como vieram:** o `nestjs-project/README.md` é o README padrão do starter do NestJS (comandos no host, que contrariam a regra de rodar tudo no container); e o `next-frontend/CLAUDE.md` descreve uma cópia versionada `next-frontend/openapi.json` e um workflow `.github/workflows/openapi-freshness.yml` que não existem no template (o `lib/api/types.gen.ts` existe, gerado antes da Fase 03).
+
 ---
 
 ## Fases do produto
