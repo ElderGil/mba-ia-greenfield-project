@@ -258,7 +258,9 @@ describe('VideoMaintenanceService (integration)', () => {
       .spyOn(storageService, 'listIncompleteUploads')
       .mockImplementation(async function* () {
         const page: IncompleteUpload[] = await Promise.reject(
-          new Error('AccessDenied: s3:ListBucketMultipartUploads'),
+          new Error(
+            'AccessDenied: s3:ListBucketMultipartUploads at http://minio:9000/streamtube-media-test?uploads&X-Amz-Signature=deadbeef',
+          ),
         );
         yield* page;
       });
@@ -273,6 +275,9 @@ describe('VideoMaintenanceService (integration)', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('AccessDenied: s3:ListBucketMultipartUploads'),
     );
+    const logged = warn.mock.calls.map(([message]) => String(message)).join();
+    expect(logged).toContain('<url>');
+    expect(logged).not.toContain('X-Amz-Signature');
   });
 
   it('fails processing videos stuck past the threshold without a live job and leaves the rest alone', async () => {

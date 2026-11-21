@@ -7,6 +7,7 @@ import { type FindOptionsWhere, LessThan, MoreThan, Repository } from 'typeorm';
 import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
+import { redactUrls } from './media-processor.service';
 import {
   processVideoJobId,
   VIDEO_PROCESSING_QUEUE,
@@ -109,7 +110,7 @@ export class VideoMaintenanceService {
         } catch (err) {
           if (!isNoSuchUpload(err)) {
             this.logger.warn(
-              `Could not abort unmatched multipart for video ${videoId}: ${(err as Error).message}`,
+              `Could not abort unmatched multipart for video ${videoId}: ${redactUrls((err as Error).message)}`,
             );
           }
         }
@@ -117,7 +118,7 @@ export class VideoMaintenanceService {
     } catch (err) {
       // Background task: the next sweep lists the bucket again.
       this.logger.warn(
-        `Could not finish the incomplete multipart sweep: ${(err as Error).message}`,
+        `Could not finish the incomplete multipart sweep: ${redactUrls((err as Error).message)}`,
       );
     }
     if (removed)
@@ -145,7 +146,7 @@ export class VideoMaintenanceService {
       } catch (err) {
         // Background task: keep the row so the next sweep retries it.
         this.logger.warn(
-          `Could not remove stale draft ${draft.id}: ${(err as Error).message}`,
+          `Could not remove stale draft ${draft.id}: ${redactUrls((err as Error).message)}`,
         );
       }
     });
