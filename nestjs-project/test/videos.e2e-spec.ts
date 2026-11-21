@@ -4,11 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import {
-  INestApplication,
-  INestApplicationContext,
-  ValidationPipe,
-} from '@nestjs/common';
+import { INestApplication, INestApplicationContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import request from 'supertest';
@@ -16,9 +12,7 @@ import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from '../src/app.module';
-import { JSON_BODY_LIMIT } from '../src/common/common.constants';
-import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
-import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { configureApp } from '../src/app.setup';
 import { MailService } from '../src/mail/mail.service';
 import { S3StorageService } from '../src/storage/s3-storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
@@ -81,20 +75,8 @@ describe('Videos (e2e)', () => {
 
     const expressApp =
       moduleFixture.createNestApplication<NestExpressApplication>();
-    // Mirrors main.ts
-    expressApp.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+    configureApp(expressApp);
     app = expressApp;
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
-    app.useGlobalFilters(
-      new DomainExceptionFilter(),
-      new ValidationExceptionFilter(),
-    );
     await app.init();
 
     const workerFixture = await Test.createTestingModule({
@@ -499,6 +481,14 @@ describe('Videos (e2e)', () => {
       .set('Range', 'items=0-1')
       .expect(200);
   }, 30000);
+
+  it('keeps the default 100 kB JSON limit on every route except complete-upload', async () => {
+    // Only complete-upload needs room for up to 10 000 part ETags.
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'big@example.com', password: 'x'.repeat(200_000) })
+      .expect(413);
+  });
 
   it('caps open drafts per channel and rate-limits upload initiation', async () => {
     const { accessToken } = await registerConfirmAndLogin('limits');

@@ -17,8 +17,13 @@ export interface MailpitMessage extends MailpitMessageSummary {
   Text: string;
 }
 
-export async function getMailpitMessages(): Promise<MailpitMessageSummary[]> {
-  const res = await fetch(`${mailpitUrl}/api/v1/messages`);
+// Mailpit is shared with the running stack: tests send to their own unique
+// address and read only its messages, never the whole mailbox.
+export async function getMailpitMessagesTo(
+  address: string,
+): Promise<MailpitMessageSummary[]> {
+  const query = encodeURIComponent(`to:"${address}"`);
+  const res = await fetch(`${mailpitUrl}/api/v1/search?query=${query}`);
   const data = (await res.json()) as { messages?: MailpitMessageSummary[] };
   return data.messages ?? [];
 }
@@ -26,8 +31,4 @@ export async function getMailpitMessages(): Promise<MailpitMessageSummary[]> {
 export async function getMailpitMessage(id: string): Promise<MailpitMessage> {
   const res = await fetch(`${mailpitUrl}/api/v1/message/${id}`);
   return (await res.json()) as MailpitMessage;
-}
-
-export async function clearMailpitMessages(): Promise<void> {
-  await fetch(`${mailpitUrl}/api/v1/messages`, { method: 'DELETE' });
 }

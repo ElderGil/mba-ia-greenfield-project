@@ -232,6 +232,8 @@ docker compose exec -T nestjs-api npm run build             # build da API e do 
 
 Os testes de integração e E2E do módulo de vídeos rodam contra PostgreSQL, Redis, `pgsty/silo` (S3) e `ffmpeg` reais; só o envio SMTP (`MailService`) é mockado no E2E. As disputas de concorrência (concluir × cancelar, concluir × varredura, resposta perdida do S3) são forçadas nos testes de integração.
 
+O mesmo gate roda no GitHub Actions ([.github/workflows/backend.yml](./.github/workflows/backend.yml)) a cada push e pull request para `dev` e `main` que mexa no backend: sobe o mesmo Compose, roda tsc, lint sem `--fix`, testes, e2e e build, confere que o `openapi.json` bate com o código e que as suítes não alteraram os dados de desenvolvimento (usuário e e-mail canários intactos, nenhuma migration pendente).
+
 As suítes nunca tocam os dados de desenvolvimento: usam o banco `streamtube_test` e o bucket `streamtube-media-test`, que o `globalSetup` do Jest cria e migra com as mesmas migrations do `migration:run` (sem `synchronize`), e o prefixo BullMQ `streamtube-test`, então o `video-worker` do Compose nunca pega job de teste. A limpeza recusa qualquer banco cujo nome não termine em `_test`. As suítes rodam em série (`maxWorkers: 1`), porque compartilham o banco de teste.
 
 ### Frontend (`next-frontend`)
