@@ -112,15 +112,16 @@ export class VideoProcessingProcessor
     // processing forever.
     const final =
       job.attemptsMade >= maxAttempts || error instanceof UnrecoverableError;
+    const reason = redactUrls(error.message);
     if (!final) {
       this.logger.warn(
-        `Job ${job.id} attempt ${job.attemptsMade}/${maxAttempts} failed: ${error.message}`,
+        `Job ${job.id} attempt ${job.attemptsMade}/${maxAttempts} failed: ${reason}`,
       );
       return;
     }
 
     this.logger.error(
-      `Job ${job.id} exhausted retries for video ${job.data.videoId}: ${error.message}`,
+      `Job ${job.id} exhausted retries for video ${job.data.videoId}: ${reason}`,
     );
 
     // Conditional: a re-delivered job failing after the video became ready
@@ -133,7 +134,7 @@ export class VideoProcessingProcessor
         {
           status: VideoStatus.FAILED,
           // Defence in depth: no error path may persist a signed URL.
-          processing_error: redactUrls(error.message).slice(0, 1000),
+          processing_error: reason.slice(0, 1000),
         },
       );
     } catch (err) {

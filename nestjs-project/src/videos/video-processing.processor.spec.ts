@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Job, UnrecoverableError } from 'bullmq';
@@ -133,25 +134,37 @@ describe('VideoProcessingProcessor', () => {
     );
   });
 
-  it('never persists URLs from an error message in processing_error', async () => {
+  it('redacts URLs from retry logs, final logs and processing_error', async () => {
     const exhaustedJob = {
       ...job,
       attemptsMade: 3,
       opts: { attempts: 3 },
     } as unknown as Job<VideoProcessingJobData>;
 
-    await processor.onFailed(
-      exhaustedJob,
-      new Error(
-        'Command failed: ffprobe http://minio:9000/streamtube-media/x.mp4?X-Amz-Signature=abc',
-      ),
-    );
+    const error = new Error('Command failed: ffprobe https://example.com/test');
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
 
-    const [, fields] = mockVideoRepo.update.mock.calls[0] as [
-      unknown,
-      { processing_error: string },
-    ];
-    expect(fields.processing_error).toBe('Command failed: ffprobe <url>');
+    try {
+      await processor.onFailed(job, error);
+      expect(mockVideoRepo.update).not.toHaveBeenCalled();
+      await processor.onFailed(exhaustedJob, error);
+
+      expect(warn).toHaveBeenCalledWith(
+        'Job process-video-v1 attempt 1/3 failed: Command failed: ffprobe <url>',
+      );
+      expect(logError).toHaveBeenCalledWith(
+        'Job process-video-v1 exhausted retries for video v1: Command failed: ffprobe <url>',
+      );
+      const [, fields] = mockVideoRepo.update.mock.calls[0] as [
+        unknown,
+        { processing_error: string },
+      ];
+      expect(fields.processing_error).toBe('Command failed: ffprobe <url>');
+    } finally {
+      warn.mockRestore();
+      logError.mockRestore();
+    }
   });
 
   it('marks video failed once max attempts are exhausted', async () => {
