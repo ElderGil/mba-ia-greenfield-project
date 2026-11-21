@@ -79,9 +79,13 @@ jobs:
           users=$(docker compose exec -T db psql -U streamtube -d streamtube -Atc \
             "SELECT count(*) FROM users WHERE email = 'ci-canary@example.com'")
           test "$users" = "1" || { echo "development database was modified"; exit 1; }
-          pending=$(docker compose exec -T nestjs-api npm run typeorm -- migration:show \
-            -d src/database/data-source.ts | grep -c '^\[ \]' || true)
-          test "$pending" = "0" || { echo "$pending migration(s) pending"; exit 1; }
+          migrations=$(docker compose exec -T nestjs-api npm run typeorm -- migration:show \
+            -d src/database/data-source.ts)
+          grep -q '^\[X\]' <<< "$migrations" || { echo "No applied migrations reported"; exit 1; }
+          if grep -q '^\[ \]' <<< "$migrations"; then
+            echo "Development migrations are pending"
+            exit 1
+          fi
           mails=$(docker compose exec -T nestjs-api curl -sf \
             'http://mailpit:8025/api/v1/search?query=to:%22ci-canary@example.com%22' \
             | sed -E 's/.*"messages_count":([0-9]+).*/\1/')
