@@ -42,7 +42,9 @@ import {
   selectRange,
   sendMedia,
 } from './videos-http.util';
+import { VideosUploadService } from './videos-upload.service';
 import { INITIATE_UPLOAD_THROTTLE, VIDEO_MIME_TYPES } from './videos.constants';
+import { VideosService } from './videos.service';
 
 const INVALID_ID_RESPONSE = {
   status: 400,
@@ -59,8 +61,6 @@ function binaryBody(types: readonly string[]): Record<string, object> {
     ]),
   );
 }
-import { VideosUploadService } from './videos-upload.service';
-import { VideosService } from './videos.service';
 
 @SkipThrottle()
 @ApiTags('videos')
