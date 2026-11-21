@@ -114,6 +114,19 @@ describe('exportSpec (integration)', () => {
     const httpErrorRef = { $ref: '#/components/schemas/ApiHttpError' };
     expect(schemaOf('401')).toEqual(httpErrorRef);
     expect(schemaOf('429')).toEqual(httpErrorRef);
+    expect(schemaOf('413')).toEqual({
+      anyOf: [{ $ref: '#/components/schemas/ApiErrorEnvelope' }, httpErrorRef],
+    });
+
+    const parts = paths['/videos/{id}/uploads/parts'].post.responses as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      (parts['413'].content as Record<string, Record<string, unknown>>)[
+        'application/json'
+      ].schema,
+    ).toEqual(httpErrorRef);
   });
 
   it('protected auth endpoints include access-token security requirement', () => {

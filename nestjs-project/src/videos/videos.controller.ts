@@ -119,8 +119,14 @@ export class VideosController {
   })
   @ApiResponse({
     status: 413,
-    description: 'Video size exceeds 10 GiB limit',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    description:
+      'Declared video size exceeds 10 GiB, or JSON body over the 100 kB parser limit',
+    schema: {
+      anyOf: [
+        { $ref: getSchemaPath(ApiErrorEnvelope) },
+        { $ref: getSchemaPath(ApiHttpError) },
+      ],
+    },
   })
   @ApiResponse({
     status: 415,
@@ -185,6 +191,11 @@ export class VideosController {
     status: 409,
     description: 'Video is not in draft status',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 413,
+    description: 'JSON body over the 100 kB parser limit',
+    type: ApiHttpError,
   })
   async signUploadPart(
     @CurrentUser() user: JwtPayload,

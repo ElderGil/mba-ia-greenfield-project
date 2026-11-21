@@ -487,6 +487,20 @@ describe('Videos (e2e)', () => {
       .post(`/videos/${randomUUID()}/uploads/complete/unknown`)
       .send({ value: 'x'.repeat(200_000) })
       .expect(413);
+
+    // The parser answers before the controller, in the framework shape the
+    // OpenAPI documents as ApiHttpError on initiate and parts.
+    for (const path of [
+      '/videos/uploads/initiate',
+      `/videos/${randomUUID()}/uploads/parts`,
+    ]) {
+      const tooLarge = await request(app.getHttpServer())
+        .post(path)
+        .send({ title: 'x'.repeat(200_000) })
+        .expect(413);
+      expect(tooLarge.body).toMatchObject({ statusCode: 413 });
+      expect(tooLarge.body).not.toHaveProperty('error');
+    }
   });
 
   it('caps open drafts per channel and rate-limits upload initiation', async () => {

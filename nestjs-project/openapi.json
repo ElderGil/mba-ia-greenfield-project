@@ -514,11 +514,18 @@
             }
           },
           "413": {
-            "description": "Video size exceeds 10 GiB limit",
+            "description": "Declared video size exceeds 10 GiB, or JSON body over the 100 kB parser limit",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiHttpError"
+                    }
+                  ]
                 }
               }
             }
@@ -637,6 +644,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON body over the 100 kB parser limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
