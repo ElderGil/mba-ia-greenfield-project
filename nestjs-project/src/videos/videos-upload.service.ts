@@ -9,9 +9,7 @@ import {
   TooManyOpenUploadsException,
   UnsupportedMediaTypeException,
   UploadLimitExceededException,
-  VideoAccessDeniedException,
   VideoInvalidStateException,
-  VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import videoConfig from '../config/video.config';
 import {
@@ -22,6 +20,7 @@ import {
 } from '../storage/s3-storage.service';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
+import { findOwnedVideo } from './video-ownership';
 import { generateShortCode } from './short-code.util';
 import { VideosQueueService } from './videos-queue.service';
 import {
@@ -435,21 +434,12 @@ export class VideosUploadService {
     userId: string,
     videoId: string,
   ): Promise<Video> {
-    const channel = await this.channelsService.findByUserId(userId);
-    if (!channel) {
-      throw new ChannelNotFoundException();
-    }
-
-    const video = await this.videoRepository.findOne({
-      where: { id: videoId },
-    });
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-
-    if (video.channel_id !== channel.id) {
-      throw new VideoAccessDeniedException();
-    }
+    const video = await findOwnedVideo(
+      this.videoRepository,
+      this.channelsService,
+      userId,
+      videoId,
+    );
 
     if (
       video.status !== VideoStatus.DRAFT ||
