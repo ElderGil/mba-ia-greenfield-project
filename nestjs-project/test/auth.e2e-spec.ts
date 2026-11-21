@@ -1,16 +1,16 @@
 import * as crypto from 'crypto';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/app.setup';
 import { RefreshToken } from '../src/auth/entities/refresh-token.entity';
 import { VerificationToken } from '../src/auth/entities/verification-token.entity';
 import { MailService } from '../src/mail/mail.service';
-import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
-import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 
 interface AuthResponseBody {
@@ -38,18 +38,10 @@ describe('Auth (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
-    app.useGlobalFilters(
-      new DomainExceptionFilter(),
-      new ValidationExceptionFilter(),
-    );
+    const expressApp =
+      moduleFixture.createNestApplication<NestExpressApplication>();
+    configureApp(expressApp);
+    app = expressApp;
     await app.init();
 
     dataSource = moduleFixture.get(DataSource);
@@ -679,18 +671,10 @@ describe('Rate Limiting (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
-    app.useGlobalFilters(
-      new DomainExceptionFilter(),
-      new ValidationExceptionFilter(),
-    );
+    const expressApp =
+      moduleFixture.createNestApplication<NestExpressApplication>();
+    configureApp(expressApp);
+    app = expressApp;
     await app.init();
 
     dataSource = moduleFixture.get(DataSource);

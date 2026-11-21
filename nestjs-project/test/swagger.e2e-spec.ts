@@ -1,11 +1,11 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
-import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { configureApp } from '../src/app.setup';
 import { buildSwaggerConfig } from '../src/swagger/swagger-document';
 
 async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
@@ -13,18 +13,8 @@ async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
     imports: [AppModule],
   }).compile();
 
-  const app = moduleFixture.createNestApplication<INestApplication<App>>();
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-  app.useGlobalFilters(
-    new DomainExceptionFilter(),
-    new ValidationExceptionFilter(),
-  );
+  const app = moduleFixture.createNestApplication<NestExpressApplication>();
+  configureApp(app);
 
   if (withSwagger) {
     const document = SwaggerModule.createDocument(app, buildSwaggerConfig());

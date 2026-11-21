@@ -27,7 +27,7 @@ description: 'Testing conventions for NestJS unit, integration, and e2e tests'
 - Test complete request/response cycles including status codes, response shape, and error cases
 - Test authentication and authorization flows (valid token, invalid token, missing token)
 - Use a real test database — do not mock the database layer in e2e tests
-- **Reproduce `main.ts` global config manually:** `Test.createTestingModule()` does not execute `main.ts`. Global pipes, filters, and interceptors must be applied explicitly in `beforeAll`: `app.useGlobalPipes(new ValidationPipe({ whitelist: true }))`
+- **Apply the production HTTP setup with `configureApp()`:** `Test.createTestingModule()` does not execute `main.ts`, so global pipes, filters, interceptors and body parsers must be applied in `beforeAll`. Call `configureApp(app)` from `src/app.setup.ts` (the same function `main.ts` calls) on an app created with `createNestApplication<NestExpressApplication>()`, before `app.init()`. Never copy the setup by hand: copies drift (the auth and Swagger suites once ran without the production body limit). New global config goes into `configureApp()` only.
 
 ## Modules with `forRootAsync` + `ConfigType`
 

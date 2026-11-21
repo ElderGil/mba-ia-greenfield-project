@@ -22,6 +22,10 @@ export function videoFormatOf(
 
 export const MAX_MULTIPART_PARTS = 10000;
 
+// The complete body may list MAX_MULTIPART_PARTS ETags (about 550 kB of
+// JSON), above the 100 kB default (see configureApp).
+export const COMPLETE_UPLOAD_JSON_LIMIT = '1mb';
+
 // Upload initiation is the only video route under the global throttler:
 // public media routes stay unlimited because players issue many range
 // requests per view.
