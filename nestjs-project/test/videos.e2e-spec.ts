@@ -25,6 +25,7 @@ import {
   VideoPublicResponseDto,
 } from '../src/videos/dto/video-response.dto';
 import { Video, VideoStatus } from '../src/videos/entities/video.entity';
+import { VideoMaintenanceProcessor } from '../src/videos/video-maintenance.processor';
 import { WorkerModule } from '../src/worker.module';
 
 const execFileAsync = promisify(execFile);
@@ -90,9 +91,15 @@ describe('Videos (e2e)', () => {
     app = expressApp;
     await app.init();
 
+    // The real worker processes the videos; the maintenance scheduler is
+    // replaced because its sweep would list the shared test bucket and abort
+    // sessions left by other runs. VideoMaintenanceService has its own suite.
     const workerFixture = await Test.createTestingModule({
       imports: [WorkerModule],
-    }).compile();
+    })
+      .overrideProvider(VideoMaintenanceProcessor)
+      .useValue({})
+      .compile();
     workerApp = await workerFixture.init();
 
     dataSource = moduleFixture.get(DataSource);
