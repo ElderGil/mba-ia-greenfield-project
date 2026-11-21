@@ -17,12 +17,7 @@ describe('VideosQueueService', () => {
     }).compile();
 
     const service = module.get(VideosQueueService);
-    const payload = {
-      videoId: 'v1',
-      channelId: 'c1',
-      storageKey: 'videos/c1/v1/original.mp4',
-      mimeType: 'video/mp4',
-    };
+    const payload = { videoId: 'v1' };
 
     const jobId = await service.enqueueProcessVideo(payload);
 

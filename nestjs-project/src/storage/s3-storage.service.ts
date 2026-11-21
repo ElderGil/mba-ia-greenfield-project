@@ -90,13 +90,25 @@ export class S3StorageService implements OnModuleInit {
         ?.$metadata?.httpStatusCode;
       const name = (err as { name?: string })?.name;
       if (status === 404 || name === 'NotFound' || name === 'NoSuchBucket') {
-        await this.client.send(
-          new CreateBucketCommand({ Bucket: this.bucket }),
-        );
-        this.logger.log(`Created S3 bucket "${this.bucket}"`);
+        await this.createBucket();
         return;
       }
       throw err;
+    }
+  }
+
+  // The API and the worker both run ensureBucket on start; on a first start
+  // both can find no bucket and both create it. The loser gets
+  // BucketAlreadyOwnedByYou, which itself proves the bucket is ours.
+  // BucketAlreadyExists (someone else's bucket) still fails.
+  private async createBucket(): Promise<void> {
+    try {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      this.logger.log(`Created S3 bucket "${this.bucket}"`);
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name !== 'BucketAlreadyOwnedByYou') {
+        throw err;
+      }
     }
   }
 

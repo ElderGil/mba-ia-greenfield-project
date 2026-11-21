@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import {
   buildContentDisposition,
   type MediaReply,
+  selectRange,
   sendMedia,
 } from './videos-http.util';
 
@@ -25,6 +26,70 @@ function reply(open: MediaReply['open']): MediaReply {
 const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
 
 describe('videos-http.util', () => {
+  describe('selectRange', () => {
+    const etag = '"vid-1-4096"';
+    const get = (headers: Record<string, string>) => ({
+      method: 'GET',
+      headers,
+    });
+
+    it('should honour a byte range on GET', () => {
+      expect(selectRange(get({ range: 'bytes=0-99' }), etag)).toBe(
+        'bytes=0-99',
+      );
+    });
+
+    it('should ignore Range on HEAD, the only method with range handling being GET', () => {
+      expect(
+        selectRange({ method: 'HEAD', headers: { range: 'bytes=0-99' } }, etag),
+      ).toBeUndefined();
+    });
+
+    it('should ignore Range when If-None-Match matches, so the 304 wins over a 416', () => {
+      expect(
+        selectRange(
+          get({ range: 'bytes=999999-', 'if-none-match': etag }),
+          etag,
+        ),
+      ).toBeUndefined();
+    });
+
+    it('should honour Range when If-Range is a strong match for the current ETag', () => {
+      expect(
+        selectRange(get({ range: 'bytes=0-99', 'if-range': etag }), etag),
+      ).toBe('bytes=0-99');
+    });
+
+    it.each([
+      ['a different ETag', '"vid-1-1"'],
+      ['a weak ETag', `W/${etag}`],
+      [
+        'an HTTP-date (no Last-Modified is sent)',
+        'Wed, 21 Oct 2026 07:28:00 GMT',
+      ],
+    ])(
+      'should send the full representation when If-Range is %s',
+      (_, ifRange) => {
+        expect(
+          selectRange(get({ range: 'bytes=0-99', 'if-range': ifRange }), etag),
+        ).toBeUndefined();
+      },
+    );
+
+    it.each([['items=0-10'], ['bytes=0-10,20-30']])(
+      'should ignore "%s" (unknown unit, or several ranges this endpoint does not serve)',
+      (range) => {
+        expect(selectRange(get({ range }), etag)).toBeUndefined();
+      },
+    );
+
+    it('should leave a malformed or unsatisfiable byte range to the parser (416)', () => {
+      expect(selectRange(get({ range: 'bytes=999999-' }), etag)).toBe(
+        'bytes=999999-',
+      );
+    });
+  });
+
   describe('buildContentDisposition', () => {
     it('should keep plain ASCII names in both filename parameters', () => {
       expect(buildContentDisposition('sample.mp4')).toBe(
@@ -53,6 +118,16 @@ describe('videos-http.util', () => {
       expect(header).toContain('filename="evilname.mp4"');
     });
 
+    it('should not let Unicode normalisation put a quote back into the ASCII fallback', () => {
+      // U+FF02 (fullwidth quotation mark) becomes '"' under NFKD.
+      const header = buildContentDisposition('a\uff02b.mp4');
+
+      expect(header).toMatch(/^attachment; filename="a_b\.mp4"; filename\*=/);
+      expect(() =>
+        validateHeaderValue('content-disposition', header),
+      ).not.toThrow();
+    });
+
     it('should fall back to video.mp4 when nothing usable is left', () => {
       expect(buildContentDisposition('"\r\n"')).toContain(
         'filename="video.mp4"',
@@ -61,6 +136,21 @@ describe('videos-http.util', () => {
   });
 
   describe('sendMedia', () => {
+    it('should not open storage for a client that already left', async () => {
+      const res = fakeResponse();
+      res.destroy();
+      const open = jest.fn();
+
+      await sendMedia(
+        { method: 'GET', headers: {} },
+        res,
+        reply(open),
+        jest.fn(),
+      );
+
+      expect(open).not.toHaveBeenCalled();
+    });
+
     it('should answer 304 without opening the source when If-None-Match matches', async () => {
       const res = fakeResponse();
       const open = jest.fn();

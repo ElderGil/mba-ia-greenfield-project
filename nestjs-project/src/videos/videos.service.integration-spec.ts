@@ -51,7 +51,6 @@ describe('VideosService (integration)', () => {
             password: dbCfg.password,
             database: dbCfg.name,
             entities: [User, Channel, RefreshToken, VerificationToken, Video],
-            synchronize: true,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
@@ -119,7 +118,7 @@ describe('VideosService (integration)', () => {
 
     const partial = await videosService.getVideoStream(
       'StreamInt11',
-      'bytes=10-15',
+      () => 'bytes=10-15',
     );
     const partialBuf = await streamToBuffer((await partial.open()).stream);
     expect(partial.isPartial).toBe(true);

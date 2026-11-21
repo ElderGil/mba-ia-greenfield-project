@@ -139,8 +139,8 @@ cp .env.example .env
 # Sobe api, video-worker, db, mailpit, minio (pgsty/silo) e redis
 docker compose up -d
 
-# Instala dependências (apenas na primeira subida). O video-worker sobe antes
-# do node_modules existir e reinicia sozinho (restart: unless-stopped) até conseguir.
+# Instala dependências (apenas na primeira subida). O video-worker espera o
+# node_modules existir ("waiting for npm install") e sobe sozinho em seguida.
 docker compose exec nestjs-api npm install
 
 # Executa as migrations (synchronize está desabilitado)
@@ -177,6 +177,8 @@ Interface disponível em `http://localhost:3001` (acessa a API no host via `host
 ---
 
 ## Endpoints da API
+
+Requisições prontas para todo o fluxo (cadastro, upload multipart, status, stream, download, thumbnail): [`nestjs-project/api.http`](./nestjs-project/api.http), para a extensão REST Client do VS Code ou equivalente. Chamando a API de fora dos containers (do host), defina `S3_PUBLIC_ENDPOINT=http://localhost:9000` para que os `PUT` nas URLs pré-assinadas resolvam.
 
 ### Vídeos — Upload, Processamento e Entrega
 
@@ -225,7 +227,7 @@ docker compose exec -T nestjs-api npm run lint              # ESLint (0 erros, 0
 docker compose exec -T nestjs-api npm run build             # build da API e do worker
 ```
 
-Os testes de integração e E2E do módulo de vídeos executam fluxos reais contra PostgreSQL, Redis, `pgsty/silo` (S3) e geração de MP4 com `ffmpeg`; apenas o envio SMTP (`MailService`) é mockado na suíte E2E. As suítes rodam em série (`maxWorkers: 1` nas duas configs do Jest, porque compartilham o banco) e usam o prefixo BullMQ `streamtube-test`, então o `video-worker` do Compose nunca pega job de teste.
+Os testes de integração e E2E do módulo de vídeos executam fluxos reais contra PostgreSQL, Redis, `pgsty/silo` (S3) e geração de MP4 com `ffmpeg`; apenas o envio SMTP (`MailService`) é mockado na suíte E2E. As suítes nunca tocam os dados de desenvolvimento: rodam no banco `streamtube_test` e no bucket `streamtube-media-test`, que o `globalSetup` do Jest cria e migra com as mesmas migrations do `migration:run` (sem `synchronize`), e no prefixo BullMQ `streamtube-test`, então o `video-worker` do Compose nunca pega job de teste. A limpeza de tabelas recusa qualquer banco cujo nome não termine em `_test`. As suítes rodam em série (`maxWorkers: 1` nas duas configs do Jest, porque compartilham o banco de teste).
 
 ### Frontend (`next-frontend`)
 
@@ -289,11 +291,13 @@ Como frente adicional de avaliação prática, toda a etapa de vídeos foi condu
 1. **Research & ADRs** — Levantamento das opções de fila, storage multipart, ciclo de estados, worker e streaming proxy em [technical-decisions-phase-03-videos.md](./docs/decisions/technical-decisions-phase-03-videos.md).
 2. **Contexto & Validação** — Mapeamento de impactos no código existente ([context.md](./docs/phases/phase-03-videos/context.md)) e auditoria prévia do plano até fechar limpo ([validation.md](./docs/phases/phase-03-videos/validation.md)).
 3. **Resolução de dependências & Especificação** — Travamento de versões compatíveis ([library-refs.md](./docs/phases/phase-03-videos/library-refs.md)) e plano detalhado em 11 itens de implementação ([phase-03-videos.md](./docs/phases/phase-03-videos/phase-03-videos.md)).
-4. **Implementação incremental & Rastreabilidade** — Entrega dos módulos, migrations, testes unitários/integração/E2E e registro em [progress.md](./docs/phases/phase-03-videos/progress.md), complementada por revisão em par (protocolo auditor/construtor com portão humano) em rodadas: na 1ª, o Claude Code auditou a entrega do Antigravity, reprovou (lint quebrado, MCP não portado) e escreveu as correções; na 2ª e na 3ª, o Antigravity auditou essas correções. Depois, uma revisão adversarial independente (Claude Fable 5.2) olhou o que as rodadas não cobriram; as correções dela foram feitas pelo Claude Code, um commit por achado, com teste de regressão antes de cada uma, e auditadas pelo Antigravity numa 4ª rodada antes do merge. Achados e correções: [progress.md](./docs/phases/phase-03-videos/progress.md) → *Post-review revisions* e *Final review revisions*.
+4. **Implementação incremental & Rastreabilidade** — Entrega dos módulos, migrations, testes unitários/integração/E2E e registro em [progress.md](./docs/phases/phase-03-videos/progress.md), complementada por revisão em par (protocolo auditor/construtor com portão humano) em rodadas: na 1ª, o Claude Code auditou a entrega do Antigravity, reprovou (lint quebrado, MCP não portado) e escreveu as correções; na 2ª e na 3ª, o Antigravity auditou essas correções. Depois, uma revisão adversarial independente (Claude Fable 5.2) olhou o que as rodadas não cobriram; as correções dela foram feitas pelo Claude Code, um commit por achado, com teste de regressão antes de cada correção de comportamento, e auditadas pelo Antigravity numa 4ª rodada antes do merge. Uma revisão externa posterior, com a stack reconstruída do zero, achou o que esse gate não cobria (suítes apagando o banco de desenvolvimento, corrida entre concluir e cancelar o upload, ordem das condicionais HTTP); as correções foram submetidas ao Antigravity numa 5ª rodada. Achados e correções: [progress.md](./docs/phases/phase-03-videos/progress.md) → *Post-review revisions*, *Final review revisions* e *External review revisions*.
 
 ---
 
-## Roadmap das Entregas
+## Fases do produto
+
+Este desafio entrega a **Fase 03** (backend: API, worker, infraestrutura e artefatos). As fases seguintes vêm do [`docs/project-plan.md`](./docs/project-plan.md) (Fases 04 a 07) e estão fora do escopo deste desafio.
 
 | Módulo / Etapa | Escopo | Status |
 |---|---|---|

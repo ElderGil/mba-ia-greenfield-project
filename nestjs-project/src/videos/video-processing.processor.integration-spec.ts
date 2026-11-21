@@ -54,7 +54,6 @@ describe('VideoProcessingProcessor (integration with MinIO + FFmpeg + Postgres)'
             password: dbCfg.password,
             database: dbCfg.name,
             entities: [User, Channel, RefreshToken, VerificationToken, Video],
-            synchronize: true,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
@@ -157,5 +156,122 @@ describe('VideoProcessingProcessor (integration with MinIO + FFmpeg + Postgres)'
     const thumbHead = await storageService.headObject(thumbKey);
     expect(thumbHead.contentLength).toBeGreaterThan(100);
     expect(thumbHead.contentType).toBe('image/jpeg');
+  });
+
+  describe('job and row state', () => {
+    let sampleMp4: Buffer;
+    let counter = 0;
+
+    beforeAll(async () => {
+      const tmp = path.join(os.tmpdir(), `proc-state-${randomUUID()}.mp4`);
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=duration=1.5:size=320x240:rate=10',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-movflags',
+        '+faststart',
+        tmp,
+      ]);
+      sampleMp4 = await fs.readFile(tmp);
+      await fs.unlink(tmp).catch(() => undefined);
+    });
+
+    async function storedVideo(status: VideoStatus): Promise<{
+      video: Video;
+      thumbKey: string;
+    }> {
+      const user = await userRepo.save(
+        userRepo.create({
+          email: `worker_state_${++counter}@example.com`,
+          password: 'hash',
+          is_confirmed: true,
+        }),
+      );
+      const channel = await channelsService.createChannel(user.id, user.email);
+      const video = await videoRepo.save(
+        videoRepo.create({
+          channel_id: channel.id,
+          short_code: `State${String(counter).padStart(6, '0')}`,
+          title: 'State Test',
+          original_filename: 'state.mp4',
+          status,
+          mime_type: 'video/mp4',
+          size_bytes: String(sampleMp4.length),
+        }),
+      );
+      const storageKey = `videos/${channel.id}/${video.id}/original.mp4`;
+      const thumbKey = `thumbnails/${channel.id}/${video.id}/thumb.jpg`;
+      createdKeys.push(storageKey, thumbKey);
+      await storageService.putObject(storageKey, sampleMp4, 'video/mp4');
+      await videoRepo.update({ id: video.id }, { storage_key: storageKey });
+      return {
+        video: await videoRepo.findOneByOrFail({ id: video.id }),
+        thumbKey,
+      };
+    }
+
+    // Older jobs also carried these; they must be ignored.
+    type LegacyJobData = VideoProcessingJobData & {
+      channelId?: string;
+      storageKey?: string;
+      mimeType?: string;
+    };
+
+    function jobFor(
+      data: LegacyJobData,
+      attemptsMade = 1,
+    ): Job<VideoProcessingJobData> {
+      return {
+        id: `process-video-${data.videoId}`,
+        data,
+        attemptsMade,
+        opts: { attempts: 3 },
+      } as unknown as Job<VideoProcessingJobData>;
+    }
+
+    it('reads the storage key and channel from the row, not from the job payload', async () => {
+      const { video, thumbKey } = await storedVideo(VideoStatus.PROCESSING);
+
+      await processor.process(
+        jobFor({
+          videoId: video.id,
+          channelId: 'not-the-channel',
+          storageKey: 'videos/elsewhere/original.mp4',
+        }),
+      );
+
+      const updated = await videoRepo.findOneByOrFail({ id: video.id });
+      expect(updated.status).toBe(VideoStatus.READY);
+      expect(updated.thumbnail_key).toBe(thumbKey);
+    });
+
+    it('skips a job whose video already left processing (failed by the sweep)', async () => {
+      const { video, thumbKey } = await storedVideo(VideoStatus.FAILED);
+
+      await processor.process(jobFor({ videoId: video.id }));
+
+      const row = await videoRepo.findOneByOrFail({ id: video.id });
+      expect(row.status).toBe(VideoStatus.FAILED);
+      await expect(storageService.headObject(thumbKey)).rejects.toThrow();
+    });
+
+    it('does not overwrite a ready video when a re-delivered job fails for good', async () => {
+      const { video } = await storedVideo(VideoStatus.READY);
+
+      await processor.onFailed(
+        jobFor({ videoId: video.id }, 3),
+        new Error('ffprobe failed: connection reset'),
+      );
+
+      const row = await videoRepo.findOneByOrFail({ id: video.id });
+      expect(row.status).toBe(VideoStatus.READY);
+      expect(row.processing_error).toBeNull();
+    });
   });
 });

@@ -47,8 +47,10 @@ export const envValidationSchema = Joi.object({
   VIDEO_MAX_OPEN_DRAFTS: Joi.number().integer().positive().default(5),
   VIDEO_DRAFT_TTL_HOURS: Joi.number().integer().positive().default(24),
   VIDEO_PROCESSING_STUCK_MINUTES: Joi.number().integer().positive().default(30),
+  // SigV4 presigned URLs are valid for at most 7 days.
   VIDEO_PRESIGNED_URL_EXPIRES_IN: Joi.number()
     .integer()
     .positive()
+    .max(604800)
     .default(900),
 });

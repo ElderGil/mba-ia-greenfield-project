@@ -164,7 +164,10 @@ describe('VideosService', () => {
         contentType: 'video/mp4',
       });
 
-      const res = await service.getVideoStream('abc12345678', 'bytes=0-9');
+      const res = await service.getVideoStream(
+        'abc12345678',
+        () => 'bytes=0-9',
+      );
       expect(mockStorageService.getObjectStream).not.toHaveBeenCalled();
       await res.open();
 

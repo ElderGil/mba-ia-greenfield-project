@@ -17,8 +17,8 @@ C4Container
 
     Rel(anonUser, frontend, "Uses", "HTTPS")
     Rel(authUser, frontend, "Uses", "HTTPS")
-    Rel(frontend, api, "Calls, plays video", "REST / HTTP Range")
-    Rel(frontend, storage, "Uploads parts (presigned PUT)", "HTTPS")
+    Rel(frontend, api, "Calls (auth today); plays video (target, Phase 05)", "REST / HTTP Range")
+    Rel(frontend, storage, "Uploads parts via presigned PUT (target: no upload screen yet)", "HTTPS")
 
     Rel(api, db, "Reads/Writes")
     Rel(api, storage, "Multipart control, presign, streams 206")

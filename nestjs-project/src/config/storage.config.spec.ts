@@ -1,0 +1,25 @@
+import storageConfig from './storage.config';
+
+describe('storageConfig', () => {
+  const saved = {
+    id: process.env.S3_ACCESS_KEY_ID,
+    secret: process.env.S3_SECRET_ACCESS_KEY,
+  };
+
+  afterEach(() => {
+    process.env.S3_ACCESS_KEY_ID = saved.id;
+    process.env.S3_SECRET_ACCESS_KEY = saved.secret;
+  });
+
+  it('should not fall back to well-known credentials when none are set', () => {
+    // The env schema requires them; a silent minioadmin default would hide
+    // a missing secret wherever the schema does not run.
+    delete process.env.S3_ACCESS_KEY_ID;
+    delete process.env.S3_SECRET_ACCESS_KEY;
+
+    const cfg = storageConfig();
+
+    expect(cfg.accessKeyId).toBe('');
+    expect(cfg.secretAccessKey).toBe('');
+  });
+});

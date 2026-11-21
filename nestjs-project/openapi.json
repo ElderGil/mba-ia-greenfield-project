@@ -662,6 +662,16 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -841,6 +851,16 @@
           "204": {
             "description": "Upload aborted and draft removed"
           },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -960,6 +980,16 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid video id (not a UUID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized",
             "content": {
@@ -1046,7 +1076,7 @@
     },
     "/videos/{shortCode}/stream": {
       "get": {
-        "description": "Streams a ready video via 206 Partial Content when a Range header is supplied, or 200 OK otherwise.",
+        "description": "Streams a ready video via 206 Partial Content for a single byte range on GET, or 200 OK otherwise. Conditionals are evaluated first (RFC 9110): a matching If-None-Match answers 304, an If-Range that is not the current ETag gets the full file. HEAD, unknown range units and multiple ranges get the full representation.",
         "operationId": "VideosController_streamVideo",
         "parameters": [
           {
@@ -1058,9 +1088,18 @@
             }
           },
           {
+            "name": "If-Range",
+            "in": "header",
+            "description": "Serve the range only if the ETag still matches; otherwise the full file",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "Range",
             "in": "header",
-            "description": "Byte range (e.g., bytes=0-1048575)",
+            "description": "Single byte range (e.g., bytes=0-1048575)",
             "required": false,
             "schema": {
               "type": "string"
@@ -1069,10 +1108,62 @@
         ],
         "responses": {
           "200": {
-            "description": "Full video byte stream"
+            "description": "Full video byte stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "206": {
-            "description": "Partial video byte stream"
+            "description": "Partial video byte stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1120,7 +1211,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Video file download stream"
+            "description": "Video file download stream",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/quicktime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/x-matroska": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1158,7 +1275,15 @@
         ],
         "responses": {
           "200": {
-            "description": "JPEG thumbnail image"
+            "description": "JPEG thumbnail image",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
           "304": {
             "description": "Not modified (If-None-Match matched the ETag)"
@@ -1386,7 +1511,8 @@
           },
           "etag": {
             "type": "string",
-            "example": "\"d41d8cd98f00b204e9800998ecf8427e\""
+            "example": "\"d41d8cd98f00b204e9800998ecf8427e\"",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1477,28 +1603,28 @@
             "type": "number"
           },
           "durationSeconds": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "width": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "height": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "codec": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "thumbnailUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "Public thumbnail URL once the video is ready"
           },
           "processingError": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "createdAt": {
@@ -1519,6 +1645,12 @@
           "status",
           "mimeType",
           "sizeBytes",
+          "durationSeconds",
+          "width",
+          "height",
+          "codec",
+          "thumbnailUrl",
+          "processingError",
           "createdAt",
           "updatedAt"
         ]
@@ -1552,19 +1684,19 @@
             "type": "number"
           },
           "durationSeconds": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "width": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "height": {
-            "type": "object",
+            "type": "integer",
             "nullable": true
           },
           "codec": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "streamUrl": {
@@ -1588,6 +1720,10 @@
           "status",
           "mimeType",
           "sizeBytes",
+          "durationSeconds",
+          "width",
+          "height",
+          "codec",
           "streamUrl",
           "downloadUrl",
           "thumbnailUrl",

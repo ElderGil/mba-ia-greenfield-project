@@ -9,8 +9,9 @@ export default registerAs('storage', () => {
     publicEndpoint,
     region: process.env.S3_REGION || 'us-east-1',
     bucket: process.env.S3_BUCKET || 'streamtube-media',
-    accessKeyId: process.env.S3_ACCESS_KEY_ID || 'minioadmin',
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || 'minioadmin',
+    // Required by the env schema: no well-known fallback (see .env.example).
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
   };
 });
