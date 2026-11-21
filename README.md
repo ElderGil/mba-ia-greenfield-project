@@ -114,9 +114,9 @@ As decisões da plataforma estão formalizadas em [docs/decisions/technical-deci
 3. **Fila BullMQ/Redis com worker isolado (`video-worker`)** — Processamento de vídeo (`ffmpeg`/`ffprobe`) é CPU/I/O-bound e roda em container separado ([worker.main.ts](./nestjs-project/src/worker.main.ts) / [WorkerModule](./nestjs-project/src/worker.module.ts)) consumindo a fila `video-processing` com backoff exponencial. O job carrega só o `videoId`; chave, canal e MIME vêm do banco. A versão `@nestjs/bullmq@^11.0.5` foi fixada intencionalmente no lugar da `12.x` (ESM-only) para preservar compatibilidade CJS na suíte Jest.
 4. **Execução nativa de `ffmpeg`/`ffprobe` sem wrappers** — [MediaProcessorService](./nestjs-project/src/videos/media-processor.service.ts) invoca os binários nativos via `child_process.execFile` (sem `fluent-ffmpeg`), extraindo `durationSeconds`, `width`, `height`, `codec` e thumbnail JPEG em `min(1s, duração/2)` (com fallback para o primeiro quadro). O demuxer é forçado a partir do MIME declarado no upload (`mov` para mp4/quicktime, `matroska` para webm/mkv), com whitelist de protocolo: imagem enviada como vídeo é recusada e uma playlist HLS disfarçada de `.mp4` não faz o worker buscar URLs (SSRF). As duas ferramentas usam a primeira trilha de vídeo que não é capa (`V:0`), então um áudio com capa não passa como vídeo. Erros das ferramentas vão para `processingError` sem a URL pré-assinada.
 5. **Streaming proxy com suporte a `Range` (`206 Partial Content`)** — [VideosService](./nestjs-project/src/videos/videos.service.ts) mantém o bucket privado e entrega `/videos/:shortCode/stream` pela API, em vez de redirecionar para uma URL pré-assinada: o acesso é checado a cada requisição (vídeo fora de `ready` responde `404`, igual a um shortCode inexistente) e não há URL presa ao hostname interno do Docker (`minio:9000`). A semântica segue a RFC 9110: condicionais antes do `Range` (`If-None-Match` → `304`, `If-Range` com ETag antiga → arquivo inteiro), `HEAD` sem `Range` e sem abrir o storage, `416` com `Content-Range: bytes */tamanho`. As respostas de mídia passam por `sendMedia()` ([videos-http.util.ts](./nestjs-project/src/videos/videos-http.util.ts)): storage aberto só quando necessário e fechado se o cliente sair, `pipeline()` em vez de `pipe()` e `Content-Disposition` RFC 6266 (nome em UTF-8 com fallback ASCII).
-6. **Ciclo do upload à prova de concorrência** — Concluir, cancelar e a varredura de manutenção disputam o draft pela mesma condição (`UPDATE` em `id` + `draft` + `upload_id`, [video-upload-session.ts](./nestjs-project/src/videos/video-upload-session.ts)) antes de qualquer chamada destrutiva no S3: só um segue, o outro recebe `409` sem tocar no storage. Antes de montar o objeto, o `complete` soma as partes gravadas e cancela o upload acima do limite (a URL pré-assinada não limita o tamanho de cada `PUT`). Partes rejeitadas pelo S3 devolvem o vídeo para `draft`; um `complete` cuja resposta se perdeu é reconciliado pelo objeto já gravado. Depois que o S3 fecha o multipart, qualquer falha (`HeadObject`, tamanho, enfileiramento) termina em `failed` com o motivo em `processingError`, nunca em `processing` sem job.
+6. **Ciclo do upload à prova de concorrência** — Concluir, cancelar e a varredura de manutenção disputam o draft pela mesma condição (`UPDATE` em `id` + `draft` + `upload_id`, [video-upload-session.ts](./nestjs-project/src/videos/video-upload-session.ts)) antes de qualquer chamada destrutiva no S3: só um segue; a API responde `409` a quem perdeu e a varredura pula o draft, sem tocar no storage. Antes de montar o objeto, o `complete` soma as partes gravadas e cancela o upload acima do limite (a URL pré-assinada não limita o tamanho de cada `PUT`). Partes rejeitadas pelo S3 devolvem o vídeo para `draft`; um `complete` cuja resposta se perdeu é reconciliado pelo objeto já gravado. Depois que o S3 fecha o multipart, qualquer falha (`HeadObject`, tamanho, enfileiramento) termina em `failed` com o motivo em `processingError`; se o processo cair nesse meio, a varredura do item 8 marca `failed`.
 7. **Storage local com `pgsty/silo`** — Como a imagem oficial `minio/minio` no Docker Hub passou a retornar `pull access denied`, o [compose.yaml](./nestjs-project/compose.yaml) utiliza `pgsty/silo` (fork comunitário S3-compatível drop-in), fixado na tag `RELEASE.2026-11-12T00-00-00Z`, com `S3_FORCE_PATH_STYLE=true`.
-8. **Worker que não deixa vídeo preso e limites de abuso** — O `video-worker` espera o `npm install` num clone novo e então faz `exec node` (sem `npm run` como PID 1), então `docker compose stop` entrega SIGTERM ao Nest e o BullMQ termina o job ativo. Ele só grava `ready`/`failed` a partir de `processing`, assim um job reentregue não sobrescreve um estado final, e job falho por travamento (`UnrecoverableError`) marca `failed` mesmo com tentativas restantes. Uma varredura a cada 15 min ([VideoMaintenanceService](./nestjs-project/src/videos/video-maintenance.service.ts), agendada pelo BullMQ) passa por todos os drafts abandonados há mais de 24 h (cancela o multipart e remove) e marca `failed` os vídeos em `processing` sem job vivo há mais de 30 min. O `initiate` tem throttle (10/min) e cada canal pode ter até 5 drafts abertos.
+8. **Worker que não deixa vídeo preso e limites de abuso** — O `video-worker` espera o `npm install` num clone novo e então faz `exec node` (sem `npm run` como PID 1), então `docker compose stop` entrega SIGTERM ao Nest e o BullMQ termina o job ativo. Ele só grava `ready`/`failed` a partir de `processing`, assim um job reentregue não sobrescreve um estado final, e job falho por travamento (`UnrecoverableError`) marca `failed` mesmo com tentativas restantes. Uma varredura a cada 15 min ([VideoMaintenanceService](./nestjs-project/src/videos/video-maintenance.service.ts), agendada pelo BullMQ) passa por todos os drafts abandonados há mais de 24 h (cancela o multipart e remove) e marca `failed` os vídeos em `processing` sem job vivo há mais de 30 min. Na mesma rodada, cancela no S3 o multipart com mais de 24 h que nenhum draft nem vídeo em `processing` reivindica: é o que sobra quando o processo cai entre o banco e o S3. O `initiate` tem throttle de 10/min por usuário (atrás de proxy, por IP todos dividiriam o limite) e cada canal pode ter até 5 drafts abertos; a contagem é feita antes de criar, então iniciações simultâneas podem passar um pouco do limite.
 
 ---
 
@@ -124,6 +124,7 @@ As decisões da plataforma estão formalizadas em [docs/decisions/technical-deci
 
 - Docker e Docker Compose v2
 - Node.js v25+ e npm (necessário no host apenas para testes E2E Playwright do frontend)
+- OpenSSL, para gerar o segredo de sessão do frontend
 
 ---
 
@@ -170,12 +171,16 @@ Serviços disponíveis:
 
 ```bash
 cd next-frontend
+
+# .env.local com a URL da API e o segredo do cookie de sessão (mínimo 32 caracteres)
+test -f .env.local || printf 'API_URL=http://host.docker.internal:3000\nSESSION_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env.local
+
 docker compose up -d
 docker compose exec next-frontend npm install        # apenas na primeira subida
 docker compose exec -d next-frontend npm run dev
 ```
 
-Interface disponível em `http://localhost:3001` (acessa a API no host via `host.docker.internal:3000`).
+Telas da Fase 02 em `http://localhost:3001/login`, `/signup` e `/forgot-password` (a raiz `/` ainda é a página padrão do Next). Sem o `.env.local`, o `lib/env.ts` recusa subir: `API_URL` e `SESSION_PASSWORD` são obrigatórios.
 
 ---
 
@@ -187,10 +192,10 @@ Requisições prontas para todo o fluxo (cadastro, upload multipart, status, str
 
 | Método e Rota | Autenticação | Responsabilidade |
 |---|---|---|
-| `POST /videos/uploads/initiate` | JWT (10/min, até 5 drafts abertos) | Cria registro `draft`, gera `shortCode` único e abre multipart upload no S3 |
+| `POST /videos/uploads/initiate` | JWT (10/min por usuário, até 5 drafts abertos) | Cria registro `draft`, gera `shortCode` único e abre multipart upload no S3; o `201` traz `Location` para o status |
 | `POST /videos/:id/uploads/parts` | JWT (dono do canal) | Emite URL pré-assinada `PUT` para uma parte específica do arquivo |
 | `GET /videos/:id/uploads/parts` | JWT (dono do canal) | Lista as partes já enviadas com ETags, para retomar o upload |
-| `POST /videos/:id/uploads/complete` | JWT (dono do canal) | Reserva o draft, confere o tamanho das partes, conclui o multipart, valida o objeto, muda para `processing` e enfileira o job |
+| `POST /videos/:id/uploads/complete` | JWT (dono do canal) | Reserva o draft (`draft` → `processing`), confere o tamanho das partes, conclui o multipart, valida o objeto e enfileira o job |
 | `POST /videos/:id/uploads/abort` | JWT (dono do canal) | Aborta o multipart no S3 e remove o `draft` (`409` se um `complete` chegou antes) |
 | `GET /videos/me` | JWT | Lista vídeos do canal pertencente ao usuário autenticado |
 | `GET /videos/:id/status` | JWT (dono do canal) | Retorna status atual, metadados extraídos e eventual `processingError` |
@@ -309,6 +314,7 @@ Depois da entrega, o código passou por revisão em par (construtor e auditor co
 | 2 e 3 | Claude Code → Antigravity | Auditoria dessas correções; falha no `HeadObject` depois do `complete` passou a terminar em `failed`. |
 | 4 | Claude Code → Antigravity | Correções de um pente fino independente (Claude Fable 5.2): download com nome Unicode, SIGTERM no worker, demuxer forçado (SSRF), URLs fora dos erros, varredura, retomada de upload, rules portadas no formato que o Antigravity carrega. |
 | 5 | Claude Code → Antigravity | Correções de uma revisão externa que reconstruiu a stack do zero: testes isolados do banco de dev, disputa concluir × cancelar, condicionais HTTP, worker que não sobrescreve estado final, teste real de 10 GiB. |
+| 6 | Claude Code, Codex e Antigravity → Claude Code e Codex | Revisão de engenharia com leitura integral do repositório: setup HTTP único para `main.ts` e e2e, parser de 1 MB só no `POST` do `complete`, Mailpit preservado, CI do backend, Swagger com a config certa, log do worker sem URL, multipart sem draft cancelado pela varredura, throttle do `initiate` por usuário, `Location` no `201` e erros do framework documentados com o formato real. A primeira submissão foi reprovada por misturar mudanças das Fases 01/02 e editar a fundação do template; elas saíram desta entrega e os problemas estão nas dúvidas abaixo. |
 
 Achados, decisões e o que ficou de fora estão no [progress.md](./docs/phases/phase-03-videos/progress.md).
 
@@ -320,6 +326,18 @@ Achados, decisões e o que ficou de fora estão no [progress.md](./docs/phases/p
 - **`synchronize` em teste (contradição com a rule).** A rule `typeorm-migrations.md` proíbe `synchronize` "in any environment". Além disso, com `synchronize` o teste valida o schema gerado das entidades, não o das migrations: uma migration faltando passa na suíte e quebra no deploy.
 
 Nesta fase o código passou a seguir a rule: banco `streamtube_test` próprio, schema aplicado pelas migrations no `globalSetup` do Jest e limpeza que recusa banco sem sufixo `_test`. A skill não foi alterada por ser parte da fundação do template; o trecho de storage ("filesystem local") e o de fila ("tecnologia a definir") também ficaram de antes das Fases 02 e 03. **Dúvida:** o padrão da skill era intencional para simplificar os testes, ou ela deveria ser regenerada (`generate-test-guide`) com o setup atual?
+
+**Única mudança feita na fundação.** A rule `nestjs-testing.md` (`.claude/` e `.agents/`) mandava reproduzir à mão, em cada e2e, a config global do `main.ts`. Com o `configureApp()` compartilhado ([app.setup.ts](./nestjs-project/src/app.setup.ts)), ela passou a apontar para ele; mantida como veio, a próxima suíte copiaria o setup de novo e voltaria a rodar sem o limite de corpo de produção.
+
+**OpenAPI dos DTOs.** A rule `nestjs-dtos.md` manda confiar no plugin do Swagger e não pôr `@ApiProperty` à mão, porque a cópia manual diverge do `class-validator`. Só que o `npm run openapi:export` roda via `ts-node`, onde o plugin não atua (o `src/metadata.ts` é um stub): os DTOs de auth, que seguem a rule, saem sem nenhuma propriedade no `openapi.json`, e o `lib/api/types.gen.ts` do frontend repete os tipos vazios. Os DTOs de vídeo desta fase declaram `@ApiProperty`, o que contraria a rule mas é o que os põe no contrato. No `dist/` o plugin já gerou os metadados (`dist/auth/dto/login.dto.js` tem `format: "email"`). **Dúvida:** o export deveria rodar sobre o build (`nest build` e `node dist/openapi-export.js`) ou gerar o `metadata.ts` com o `PluginMetadataGenerator`? Qualquer um dos dois dispensa o `@ApiProperty` manual.
+
+**Problemas no código das Fases 01/02, fora do escopo e não corrigidos aqui** (achados na revisão da rodada 6):
+
+- O BFF de login registra a resposta da API com os tokens: `console.log(error, data, response)` em `next-frontend/app/api/auth/login/route.ts`. É o mais urgente.
+- A rotação de refresh token não é condicional: dois `POST /auth/refresh` simultâneos com o mesmo token passam pela checagem de `revoked_at` e geram dois tokens ativos na família.
+- Dois cadastros simultâneos com o mesmo e-mail estouram a `UNIQUE` e respondem `500`, não `409`.
+- `JWT_*_EXPIRATION` aceita qualquer texto no Joi, mas `jwtExpirationToMs` só entende `\d+[smhd]` e devolve `0` no resto: o refresh token nasce vencido, sem erro no boot.
+- `DB_HOST` tem default `localhost`, contra a regra de usar o nome do serviço do Compose.
 
 **Outros resíduos, fora do escopo desta fase e mantidos como vieram:** o `nestjs-project/README.md` é o README padrão do starter do NestJS (comandos no host, que contrariam a regra de rodar tudo no container); e o `next-frontend/CLAUDE.md` descreve uma cópia versionada `next-frontend/openapi.json` e um workflow `.github/workflows/openapi-freshness.yml` que não existem no template (o `lib/api/types.gen.ts` existe, gerado antes da Fase 03).
 

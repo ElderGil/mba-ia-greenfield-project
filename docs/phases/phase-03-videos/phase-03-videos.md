@@ -192,7 +192,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 1. Create `src/videos/media-processor.service.ts`:
    - `probeVideo(inputUrlOrPath: string)`: runs `ffprobe -v quiet -print_format json -show_format -show_streams <input>` via `execFile`, parsing `durationSeconds` (float), `width` (int), `height` (int), `codec` (`codec_name` of first video stream). _Revised 2026-11-20 (final review, round 5): `probeVideo(input, mimeType)` / `generateThumbnail(input, duration, mimeType)` force the demuxer from the stored MIME with a protocol whitelist, run ffprobe with `-v error -select_streams V:0 -show_entries …`, and ffmpeg maps `0:V:0` (first video track that is not cover art)._
-   - `generateThumbnail(inputUrlOrPath: string, durationSeconds: number)`: computes target timestamp (`durationSeconds >= 1 ? 1 : 0`), runs `ffmpeg -y -ss <ts> -i <input> -vframes 1 -q:v 2 -f image2 <tempJpg>`, reads JPEG buffer, and cleans up temp file in `finally`.
+   - `generateThumbnail(inputUrlOrPath: string, durationSeconds: number)`: computes target timestamp (`durationSeconds >= 1 ? 1 : 0`), runs `ffmpeg -y -ss <ts> -i <input> -vframes 1 -q:v 2 -f image2 <tempJpg>`, reads JPEG buffer, and cleans up temp file in `finally`. _Revised 2026-11-21 (round 6): the code targets `min(1, durationSeconds / 2)` and falls back to the first frame._
 2. Create `src/videos/video-processing.processor.ts` (`@Processor(VIDEO_PROCESSING_QUEUE, { concurrency: 2 })` extending `WorkerHost`):
    - `process(job)`: fetches video row, obtains presigned GET URL (internal MinIO endpoint) for `storage_key` (or downloads to temp file if needed), calls `probeVideo` + `generateThumbnail`, uploads JPEG to `thumbnails/{channelId}/{videoId}/thumb.jpg` via `S3StorageService.putObject`, updates `Video` (`status = 'ready'`, `thumbnail_key`, `duration_seconds`, `width`, `height`, `codec`; _Revised 2026-11-20 (final review)_: `size_bytes` is set by the API from `HeadObject` at complete, not by the worker, `processing_error = null`).
    - `@OnWorkerEvent('failed')`: when `job.attemptsMade >= (job.opts.attempts ?? 1)`, sets `status = 'failed'` and stores truncated `processing_error`.
@@ -380,6 +380,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 - `storageKey`: `string`
 - `partSizeBytes`: `number` (default `10485760` = 10 MiB)
 - `maxParts`: `number` (`10000`)
+- _Revised 2026-11-21 (round 6): `Location: /videos/{videoId}/status` header, following the template convention for a `201` whose resource has a GET endpoint._
 
 **Error responses:**
 - `400 VALIDATION_ERROR`: invalid body fields
@@ -561,11 +562,11 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
 | `VIDEO_ACCESS_DENIED` | 403 | Authenticated user attempts to sign/complete/abort/inspect a video owned by another channel |
 | `VIDEO_INVALID_STATE` | 409 | Upload part/complete/abort requested on a video not in `draft` status |
 | `TOO_MANY_OPEN_UPLOADS` | 409 | Initiate while the channel already holds `VIDEO_MAX_OPEN_DRAFTS` (5) drafts |
-| `UPLOAD_LIMIT_EXCEEDED` | 413 | Declared `sizeBytes` or actual S3 `HeadObject` size exceeds `10737418240` bytes (10 GiB) |
+| `UPLOAD_LIMIT_EXCEEDED` | 413 | Declared `sizeBytes` or actual S3 `HeadObject` size exceeds `10737418240` bytes (10 GiB) (_Revised 2026-11-21 (round 6): also the sum of the stored parts, checked before assembly_) |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | `mimeType` not in `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska` |
 | `INVALID_UPLOAD_PARTS` | 400 | Duplicate or S3-rejected multipart upload parts on complete (empty lists fail validation; unsorted lists are sorted, not rejected) |
 | `INVALID_RANGE` | 416 | Malformed or unsatisfiable HTTP `Range` header on `/stream` (response carries `Content-Range: bytes */size`) |
-| _(throttler)_ | 429 | More than 10 `POST /videos/uploads/initiate` per minute |
+| _(throttler)_ | 429 | More than 10 `POST /videos/uploads/initiate` per minute (_Revised 2026-11-21 (round 6): counted per authenticated user; the body is Nest's default, documented as `ApiHttpError`_) |
 
 ---
 
@@ -583,6 +584,8 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
   "mimeType": "video/mp4"
 }
 ```
+
+_Revised 2026-11-21 (round 6): since round 5 the job carries only `{ "videoId" }`; the worker reads channel, key and MIME from the row and still accepts older jobs with the larger payload._
 
 **Producer:** `VideosQueueService` inside `nestjs-api` (`POST /videos/:id/uploads/complete`) (per `phase-03-videos/TD-01`, `TD-04`)
 **Consumer:** `VideoProcessingProcessor` inside `video-worker` (`@Processor('video-processing')`) (per `phase-03-videos/TD-01`, `TD-05`)
