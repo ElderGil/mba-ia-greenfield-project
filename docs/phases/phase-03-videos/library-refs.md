@@ -21,7 +21,7 @@ libs:
     source: "context7 /aws/aws-sdk-js-v3 (v3.1153.0, packages/s3-request-presigner README; installed 3.1170.0) + npm view @aws-sdk/s3-request-presigner@3.1170.0"
     fetched_at: "2026-11-16T21:27:15-03:00"
 sources_mtime:
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-16T21:27:05-0300"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-11-20T21:00:44-0300"
 ---
 
 # phase-03-videos — Library References
@@ -29,6 +29,8 @@ sources_mtime:
 Distilled official API references for libraries decided in Phase 03 (`technical-decisions-phase-03-videos.md`). Verified against npm registry compatibility with `@nestjs/core ^11.0.1` and Node.js 25.
 
 > **Re-verification (2026-11-17, peer review):** the first version of this file cited only `npm view` + docs, because context7 was not configured in the Antigravity MCP config. The APIs below were re-checked through context7. Version gaps between the context7 index and the installed packages, flagged per `CLAUDE.md` → Library Documentation Lookup: `bullmq` (context7 v6.3.11, installed 6.7.6) and `@aws-sdk/*` (context7 v3.1153.0, installed 3.1170.0). The installed versions are the ones exercised by the unit, integration and e2e suites against real Redis and MinIO.
+
+> **Chronology and versions (recorded 2026-11-20, round 5):** two lookups, on two days. (1) 2026-11-16, before the first code commit (`97e8f64` 21:29, code in `8e2765c`/`0b94e88` 22:17): `npm view` and the official docs; the `fetched_at` values in the frontmatter are that pass. context7 was not configured in the Antigravity MCP config yet, so the "consult context7 before implementing" rule was **not** met for the initial code. (2) 2026-11-17 (`0977011`): the same APIs re-checked through context7, after the code. Versions, per library: the frontmatter `version` is the `package.json` range; the lockfile resolves `@nestjs/bullmq` 11.0.5, `bullmq` 6.7.6, `ioredis` 5.11.1, `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1170.0; the context7 index was `bullmq` v6.3.11 and `@aws-sdk/*` v3.1153.0 (gaps flagged below).
 
 > **Final review additions (2026-11-20):** APIs adopted after the peer review, each checked through context7 before use (same version gaps as above):
 > - `@aws-sdk/client-s3`: `S3Client({ requestChecksumCalculation: 'WHEN_REQUIRED' })` on the presign client (UploadPart does not require a checksum; with the default `WHEN_SUPPORTED` the SDK signs a CRC32 of the empty body into the URL). `ListPartsCommand` with `MaxParts` / `PartNumberMarker`, paged on `IsTruncated`: the documented `paginateListParts` loops forever against MinIO/silo, whose last page carries `NextPartNumberMarker: "0"`.
@@ -181,3 +183,6 @@ const url = await getSignedUrl(s3Client, partCmd, { expiresIn: 900 });
 const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
 const internalUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 900 });
 ```
+
+> **Round 5 additions (2026-11-20):** checked through context7 before use. `bullmq`: `upsertJobScheduler(id, repeat, { name, opts })` takes job options in the template, used for `removeOnComplete` / `removeOnFail` on the sweep. `@nestjs/swagger` 11.4.2: without an explicit `type`, `@ApiProperty` uses the TypeScript `design:type`, which is `Object` for `number | null` / `string | null`, hence `type` + `nullable` on those fields; `@ApiResponse({ content })` for binary bodies. Not from a library index: `BucketAlreadyOwnedByYou` is the `CreateBucket` error name returned by silo (observed in the integration test), and `-select_streams V:0` / `-map 0:V:0` are FFmpeg stream specifiers (`V` = video that is not an attached picture), verified against the FFmpeg 5.1 in `Dockerfile.dev`.
+

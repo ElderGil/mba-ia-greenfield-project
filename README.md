@@ -178,6 +178,8 @@ Interface disponível em `http://localhost:3001` (acessa a API no host via `host
 
 ## Endpoints da API
 
+Requisições prontas para todo o fluxo (cadastro, upload multipart, status, stream, download, thumbnail): [`nestjs-project/api.http`](./nestjs-project/api.http), para a extensão REST Client do VS Code ou equivalente. Chamando a API de fora dos containers (do host), defina `S3_PUBLIC_ENDPOINT=http://localhost:9000` para que os `PUT` nas URLs pré-assinadas resolvam.
+
 ### Vídeos — Upload, Processamento e Entrega
 
 | Método e Rota | Autenticação | Responsabilidade |
@@ -293,7 +295,9 @@ Como frente adicional de avaliação prática, toda a etapa de vídeos foi condu
 
 ---
 
-## Roadmap das Entregas
+## Fases do produto
+
+Este desafio entrega a **Fase 03** (backend: API, worker, infraestrutura e artefatos). As fases seguintes vêm do [`docs/project-plan.md`](./docs/project-plan.md) (Fases 04 a 07) e estão fora do escopo deste desafio.
 
 | Módulo / Etapa | Escopo | Status |
 |---|---|---|
