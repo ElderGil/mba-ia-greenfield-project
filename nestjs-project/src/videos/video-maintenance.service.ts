@@ -12,7 +12,8 @@ import {
   VIDEO_PROCESSING_QUEUE,
   type VideoProcessingJobData,
 } from './videos-queue.constants';
-import { discardDraftUpload } from './video-upload-session';
+import { discardDraftUpload, isNoSuchUpload } from './video-upload-session';
+import { VIDEO_FORMATS } from './videos.constants';
 
 export interface SweepResult {
   abortedDrafts: number;
@@ -21,6 +22,14 @@ export interface SweepResult {
 
 // Rows read per query; a run pages through every eligible row.
 const SWEEP_PAGE = 100;
+const UUID_IN_KEY = '[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}';
+const STORED_EXTENSIONS = Object.values(VIDEO_FORMATS)
+  .map(({ extension }) => extension)
+  .join('|');
+const VIDEO_UPLOAD_KEY = new RegExp(
+  `^videos/${UUID_IN_KEY}/(${UUID_IN_KEY})/original\\.(?:${STORED_EXTENSIONS})$`,
+  'i',
+);
 // States in which the job will still move the video out of processing.
 const LIVE_JOB_STATES = new Set([
   'active',
@@ -36,7 +45,10 @@ const LIVE_JOB_STATES = new Set([
  *   forever; past the TTL the upload is aborted and the draft removed;
  * - a video can stay in processing with no job (API stopped between the
  *   claim and the enqueue, or a job lost in Redis); past the threshold,
- *   and only if no live job exists, it is marked failed.
+ *   and only if no live job exists, it is marked failed;
+ * - a multipart session can outlive its row (process stopped between the
+ *   database and S3 calls); past the draft TTL, a session under the video
+ *   key layout that no draft or processing video claims is aborted.
  */
 @Injectable()
 export class VideoMaintenanceService {
@@ -62,7 +74,54 @@ export class VideoMaintenanceService {
         `Sweep removed ${result.abortedDrafts} stale draft(s) and failed ${result.failedOrphans} orphaned video(s)`,
       );
     }
+    await this.abortUnclaimedUploads(now);
     return result;
+  }
+
+  private async abortUnclaimedUploads(now: Date): Promise<void> {
+    const cutoff = now.getTime() - this.config.draftTtlHours * 3_600_000;
+    let removed = 0;
+    try {
+      for await (const upload of this.storageService.listIncompleteUploads(
+        'videos/',
+      )) {
+        const videoId = VIDEO_UPLOAD_KEY.exec(upload.key)?.[1];
+        if (!videoId || upload.initiated.getTime() >= cutoff) continue;
+
+        const video = await this.videoRepository.findOne({
+          where: { id: videoId },
+        });
+        // Leave normal in-progress sessions to their lifecycle and state claims.
+        if (
+          video?.status === VideoStatus.PROCESSING ||
+          (video?.status === VideoStatus.DRAFT &&
+            video.storage_key === upload.key &&
+            video.upload_id === upload.uploadId)
+        )
+          continue;
+
+        try {
+          await this.storageService.abortMultipartUpload(
+            upload.key,
+            upload.uploadId,
+          );
+          removed++;
+        } catch (err) {
+          if (!isNoSuchUpload(err)) {
+            this.logger.warn(
+              `Could not abort unmatched multipart for video ${videoId}: ${(err as Error).message}`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      // Background task: the next sweep lists the bucket again.
+      this.logger.warn(
+        `Could not finish the incomplete multipart sweep: ${(err as Error).message}`,
+      );
+    }
+    if (removed)
+      this.logger.log(`Sweep aborted ${removed} unmatched multipart upload(s)`);
   }
 
   private async removeStaleDrafts(now: Date): Promise<number> {

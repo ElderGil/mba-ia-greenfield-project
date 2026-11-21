@@ -193,4 +193,48 @@ describe('S3StorageService (integration)', () => {
       storageService.abortMultipartUpload(key, uploadId),
     ).resolves.toBeUndefined();
   });
+
+  it('lists incomplete uploads across pages and filters by prefix', async () => {
+    const stamp = Date.now();
+    const matchingPrefix = `tests/incomplete-${stamp}/`;
+    const firstKey = `${matchingPrefix}a.mp4`;
+    const secondKey = `${matchingPrefix}b.mp4`;
+    const otherKey = `tests/other-${stamp}/c.mp4`;
+
+    const firstId = await storageService.createMultipartUpload(
+      firstKey,
+      'video/mp4',
+    );
+    const secondId = await storageService.createMultipartUpload(
+      secondKey,
+      'video/mp4',
+    );
+    const otherId = await storageService.createMultipartUpload(
+      otherKey,
+      'video/mp4',
+    );
+    openUploads.push(
+      { key: firstKey, uploadId: firstId },
+      { key: secondKey, uploadId: secondId },
+      { key: otherKey, uploadId: otherId },
+    );
+
+    // maxUploads=1 forces cursor pagination across multiple S3 responses.
+    const found: Array<{ key: string; uploadId: string }> = [];
+    for await (const upload of storageService.listIncompleteUploads(
+      matchingPrefix,
+      1,
+    )) {
+      found.push({ key: upload.key, uploadId: upload.uploadId });
+    }
+
+    expect(found).toEqual(
+      expect.arrayContaining([
+        { key: firstKey, uploadId: firstId },
+        { key: secondKey, uploadId: secondId },
+      ]),
+    );
+    expect(found).toHaveLength(2);
+    expect(found.some((u) => u.key === otherKey)).toBe(false);
+  });
 });

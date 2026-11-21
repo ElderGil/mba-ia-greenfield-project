@@ -7,6 +7,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListMultipartUploadsCommand,
   PutObjectCommand,
   ListPartsCommand,
   S3Client,
@@ -26,6 +27,12 @@ export interface CompletedPartInput {
 
 export interface UploadedPart extends CompletedPartInput {
   sizeBytes: number;
+}
+
+export interface IncompleteUpload {
+  key: string;
+  uploadId: string;
+  initiated: Date;
 }
 
 export interface StorageObjectMetadata {
@@ -127,6 +134,49 @@ export class S3StorageService implements OnModuleInit {
       throw new Error('S3 CreateMultipartUpload did not return an UploadId');
     }
     return res.UploadId;
+  }
+
+  async *listIncompleteUploads(
+    prefix: string,
+    maxUploads = 1000,
+  ): AsyncGenerator<IncompleteUpload> {
+    let keyMarker: string | undefined;
+    let uploadIdMarker: string | undefined;
+    for (;;) {
+      const page = await this.client.send(
+        new ListMultipartUploadsCommand({
+          Bucket: this.bucket,
+          KeyMarker: keyMarker,
+          UploadIdMarker: uploadIdMarker,
+          MaxUploads: maxUploads,
+        }),
+      );
+      for (const upload of page.Uploads ?? []) {
+        // The pinned Silo release handles an exact key but returns no
+        // uploads for a directory Prefix. Keep prefix filtering here.
+        if (
+          upload.Key?.startsWith(prefix) &&
+          upload.UploadId &&
+          upload.Initiated
+        ) {
+          yield {
+            key: upload.Key,
+            uploadId: upload.UploadId,
+            initiated: upload.Initiated,
+          };
+        }
+      }
+      if (!page.IsTruncated) return;
+      if (
+        !page.NextKeyMarker ||
+        (page.NextKeyMarker === keyMarker &&
+          page.NextUploadIdMarker === uploadIdMarker)
+      ) {
+        throw new Error('S3 multipart listing did not advance its cursor');
+      }
+      keyMarker = page.NextKeyMarker;
+      uploadIdMarker = page.NextUploadIdMarker;
+    }
   }
 
   async getPresignedPartUrl(
