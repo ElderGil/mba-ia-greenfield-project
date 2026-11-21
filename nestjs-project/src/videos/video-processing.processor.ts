@@ -11,6 +11,10 @@ import {
   type VideoProcessingJobData,
 } from './videos-queue.constants';
 
+// Leave time for both media tools and their per-call timeouts. The public
+// presign setting governs upload parts only.
+const WORKER_INPUT_URL_TTL_SECONDS = 900;
+
 @Processor(VIDEO_PROCESSING_QUEUE, { concurrency: 2 })
 export class VideoProcessingProcessor
   extends WorkerHost
@@ -60,7 +64,7 @@ export class VideoProcessingProcessor
 
     const inputUrl = await this.storageService.getPresignedGetUrl(
       video.storage_key,
-      900,
+      WORKER_INPUT_URL_TTL_SECONDS,
     );
     // The MIME stored at initiate drives the demuxer (see MediaProcessorService).
     const metadata = await this.mediaProcessor.probeVideo(
