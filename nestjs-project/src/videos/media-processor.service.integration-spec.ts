@@ -346,6 +346,10 @@ describe('MediaProcessorService (integration with ffmpeg/ffprobe)', () => {
       await new Promise((r) => server.close(r));
     });
 
+    beforeEach(() => {
+      requested.length = 0;
+    });
+
     it('reports a short tool error without the signed URL or its credentials', async () => {
       const signed = `${baseUrl}/missing.mp4?X-Amz-Credential=minioadmin%2F20261120&X-Amz-Signature=deadbeefcafe`;
 

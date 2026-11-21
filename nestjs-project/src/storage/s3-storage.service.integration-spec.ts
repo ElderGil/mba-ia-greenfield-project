@@ -51,16 +51,15 @@ describe('S3StorageService (integration)', () => {
   it('lets the API and the worker create a missing bucket at the same time', async () => {
     // First start: both processes find no bucket and both create it.
     const cfg = { ...storageConfig(), bucket: `race-${Date.now()}` };
-    const services = await Promise.all(
-      [1, 2].map(async () => {
-        const ref = await Test.createTestingModule({
+    const refs = await Promise.all(
+      [1, 2].map(() =>
+        Test.createTestingModule({
           providers: [
             S3StorageService,
             { provide: storageConfig.KEY, useValue: cfg },
           ],
-        }).compile();
-        return ref.get(S3StorageService);
-      }),
+        }).compile(),
+      ),
     );
     const admin = new S3Client({
       region: cfg.region,
@@ -74,9 +73,12 @@ describe('S3StorageService (integration)', () => {
 
     try {
       await expect(
-        Promise.all(services.map((service) => service.ensureBucket())),
+        Promise.all(
+          refs.map((ref) => ref.get(S3StorageService).ensureBucket()),
+        ),
       ).resolves.toBeDefined();
     } finally {
+      await Promise.all(refs.map((ref) => ref.close()));
       await admin
         .send(new DeleteBucketCommand({ Bucket: cfg.bucket }))
         .catch(() => undefined);

@@ -102,6 +102,7 @@ describe('VideosUploadService (integration)', () => {
 
   let counter = 0;
   afterEach(async () => {
+    jest.restoreAllMocks();
     await multipartUploads.abortRemaining(storageService);
   });
 

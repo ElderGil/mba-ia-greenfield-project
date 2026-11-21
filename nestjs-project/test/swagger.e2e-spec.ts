@@ -21,6 +21,16 @@ async function createApp(): Promise<INestApplication<App>> {
 }
 
 describe('Swagger endpoints (e2e)', () => {
+  const originalSwaggerEnabled = process.env.SWAGGER_ENABLED;
+
+  afterAll(() => {
+    if (originalSwaggerEnabled === undefined) {
+      delete process.env.SWAGGER_ENABLED;
+    } else {
+      process.env.SWAGGER_ENABLED = originalSwaggerEnabled;
+    }
+  });
+
   describe('when SWAGGER_ENABLED=true', () => {
     let app: INestApplication<App>;
 
@@ -31,7 +41,6 @@ describe('Swagger endpoints (e2e)', () => {
 
     afterAll(async () => {
       await app.close();
-      delete process.env.SWAGGER_ENABLED;
     });
 
     it('GET /api/docs returns 200 with HTML containing the custom title', async () => {
@@ -73,11 +82,11 @@ describe('Swagger endpoints (e2e)', () => {
     });
   });
 
-  describe('when SWAGGER_ENABLED is not set', () => {
+  describe('when SWAGGER_ENABLED is disabled', () => {
     let app: INestApplication<App>;
 
     beforeAll(async () => {
-      delete process.env.SWAGGER_ENABLED;
+      process.env.SWAGGER_ENABLED = 'false';
       app = await createApp();
     });
 

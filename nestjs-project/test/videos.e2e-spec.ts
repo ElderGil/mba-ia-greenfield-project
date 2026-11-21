@@ -117,6 +117,7 @@ describe('Videos (e2e)', () => {
   });
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     await multipartUploads.abortRemaining(storageService);
   });
 
