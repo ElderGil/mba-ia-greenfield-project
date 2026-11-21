@@ -62,6 +62,12 @@ function binaryBody(types: readonly string[]): Record<string, object> {
   );
 }
 
+// JwtAuthGuard runs before ThrottlerGuard, so the initiate limit counts per
+// user; behind a proxy every client would otherwise share one IP.
+function uploaderTracker(req: Request & { user?: JwtPayload }): string {
+  return req.user?.sub ? `user:${req.user.sub}` : `ip:${req.ip ?? 'unknown'}`;
+}
+
 @SkipThrottle()
 @ApiTags('videos')
 @Controller('videos')
@@ -75,7 +81,9 @@ export class VideosController {
 
   @Post('uploads/initiate')
   @SkipThrottle({ default: false })
-  @Throttle({ default: INITIATE_UPLOAD_THROTTLE })
+  @Throttle({
+    default: { ...INITIATE_UPLOAD_THROTTLE, getTracker: uploaderTracker },
+  })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Initiate multipart video upload',

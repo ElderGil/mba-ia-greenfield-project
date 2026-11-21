@@ -505,6 +505,20 @@ describe('Videos (e2e)', () => {
     for (let i = 0; i < 4; i++) await initiate('application/pdf').expect(415);
     await initiate('application/pdf').expect(429);
 
+    // The limit is per user: another account can still initiate.
+    const anotherUser = await registerConfirmAndLogin('limits_other_user');
+    const anotherDraft = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${anotherUser.accessToken}`)
+      .send({
+        title: 'Draft',
+        filename: 'b.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 1024,
+      })
+      .expect(201);
+    trackDraft(anotherDraft);
+
     // Public media routes stay unthrottled (players issue many range requests).
     for (let i = 0; i < 12; i++) {
       await request(app.getHttpServer())
