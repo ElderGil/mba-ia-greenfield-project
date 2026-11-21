@@ -506,7 +506,9 @@ describe('Videos (e2e)', () => {
 
     // 6 requests so far; rejected ones count too. The 11th within a minute is throttled.
     for (let i = 0; i < 4; i++) await initiate('application/pdf').expect(415);
-    await initiate('application/pdf').expect(429);
+    const throttled = await initiate('application/pdf').expect(429);
+    expect(throttled.body).toMatchObject({ statusCode: 429 });
+    expect(throttled.body).not.toHaveProperty('error');
 
     // The limit is per user: another account can still initiate.
     const anotherUser = await registerConfirmAndLogin('limits_other_user');
@@ -659,8 +661,8 @@ describe('Videos (e2e)', () => {
   });
 
   it('enforces auth, size/MIME limits, validation, ownership, and abort cleanup', async () => {
-    // Unauthenticated initiate -> 401
-    await request(app.getHttpServer())
+    // Unauthenticated initiate -> 401 in the framework shape (ApiHttpError)
+    const unauthenticated = await request(app.getHttpServer())
       .post('/videos/uploads/initiate')
       .send({
         title: 'No Auth',
@@ -669,6 +671,10 @@ describe('Videos (e2e)', () => {
         sizeBytes: 1024,
       })
       .expect(401);
+    expect(unauthenticated.body).toEqual({
+      statusCode: 401,
+      message: 'Unauthorized',
+    });
 
     const owner = await registerConfirmAndLogin('owner');
     const otherUser = await registerConfirmAndLogin('other');

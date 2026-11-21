@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { ApiHttpError } from '../common/openapi/api-http-error.dto';
 import swaggerConfig from '../config/swagger.config';
 
 function buildSwaggerConfig() {
@@ -18,7 +19,7 @@ function buildSwaggerConfig() {
 
 export function buildSwaggerDocument(app: INestApplication) {
   return SwaggerModule.createDocument(app, buildSwaggerConfig(), {
-    extraModels: [ApiErrorEnvelope],
+    extraModels: [ApiErrorEnvelope, ApiHttpError],
   });
 }
 

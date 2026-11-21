@@ -91,6 +91,31 @@ describe('exportSpec (integration)', () => {
     expect(hasRef).toBe(true);
   });
 
+  it('documents framework errors on video routes with ApiHttpError', () => {
+    const components = document.components as Record<string, unknown>;
+    const schemas = components.schemas as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(schemas['ApiHttpError']).toMatchObject({
+      required: ['statusCode', 'message'],
+    });
+
+    const paths = document.paths as Record<
+      string,
+      Record<string, Record<string, unknown>>
+    >;
+    const responses = paths['/videos/uploads/initiate'].post
+      .responses as Record<string, Record<string, unknown>>;
+    const schemaOf = (status: string) =>
+      (responses[status].content as Record<string, Record<string, unknown>>)[
+        'application/json'
+      ].schema;
+    const httpErrorRef = { $ref: '#/components/schemas/ApiHttpError' };
+    expect(schemaOf('401')).toEqual(httpErrorRef);
+    expect(schemaOf('429')).toEqual(httpErrorRef);
+  });
+
   it('protected auth endpoints include access-token security requirement', () => {
     const paths = document.paths as Record<
       string,

@@ -488,7 +488,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -534,7 +534,14 @@
             }
           },
           "429": {
-            "description": "Too many upload initiations; retry later"
+            "description": "Too many upload initiations; retry later",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiHttpError"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -599,7 +606,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -685,7 +692,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -783,7 +790,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -819,11 +826,18 @@
             }
           },
           "413": {
-            "description": "Completed object size exceeds 10 GiB limit",
+            "description": "JSON request or completed media exceeds its size limit",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiHttpError"
+                    }
+                  ]
                 }
               }
             }
@@ -874,7 +888,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -945,6 +959,16 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "$ref": "#/components/schemas/ApiHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found for user",
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
@@ -1003,7 +1027,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                  "$ref": "#/components/schemas/ApiHttpError"
                 }
               }
             }
@@ -1435,6 +1459,26 @@
           "storageKey",
           "partSizeBytes",
           "maxParts"
+        ]
+      },
+      "ApiHttpError": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "number",
+            "example": 401
+          },
+          "message": {
+            "type": "string",
+            "example": "Unauthorized"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "statusCode",
+          "message"
         ]
       },
       "SignUploadPartDto": {

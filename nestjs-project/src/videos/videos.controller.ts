@@ -26,6 +26,7 @@ import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { ApiHttpError } from '../common/openapi/api-http-error.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { SignUploadPartDto } from './dto/sign-upload-part.dto';
@@ -109,7 +110,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 404,
@@ -134,6 +135,7 @@ export class VideosController {
   @ApiResponse({
     status: 429,
     description: 'Too many upload initiations; retry later',
+    type: ApiHttpError,
   })
   async initiateUpload(
     @CurrentUser() user: JwtPayload,
@@ -167,7 +169,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -213,7 +215,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -263,7 +265,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -282,8 +284,13 @@ export class VideosController {
   })
   @ApiResponse({
     status: 413,
-    description: 'Completed object size exceeds 10 GiB limit',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    description: 'JSON request or completed media exceeds its size limit',
+    schema: {
+      anyOf: [
+        { $ref: getSchemaPath(ApiErrorEnvelope) },
+        { $ref: getSchemaPath(ApiHttpError) },
+      ],
+    },
   })
   async completeUpload(
     @CurrentUser() user: JwtPayload,
@@ -307,7 +314,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -346,6 +353,11 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
+    type: ApiHttpError,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Channel not found for user',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async listMyVideos(
@@ -372,7 +384,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
