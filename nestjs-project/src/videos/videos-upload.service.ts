@@ -401,7 +401,7 @@ export class VideosUploadService {
     channelId: string,
     dto: InitiateUploadDto,
   ): Promise<Video> {
-    for (let attempt = 0; attempt < MAX_SHORT_CODE_RETRIES; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       const entity = this.videoRepository.create({
         channel_id: channelId,
         short_code: generateShortCode(),
@@ -417,17 +417,13 @@ export class VideosUploadService {
       } catch (err) {
         if (
           isPgUniqueViolationOnShortCode(err) &&
-          attempt < MAX_SHORT_CODE_RETRIES - 1
+          attempt < MAX_SHORT_CODE_RETRIES
         ) {
           continue;
         }
         throw err;
       }
     }
-
-    throw new Error(
-      'Could not allocate a unique video short code after maximum retries',
-    );
   }
 
   private async requireOwnedDraftVideo(
