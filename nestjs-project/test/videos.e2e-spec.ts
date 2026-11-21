@@ -201,6 +201,9 @@ describe('Videos (e2e)', () => {
       .expect(201);
 
     const initBody = trackDraft(initRes);
+    expect(initRes.headers['location']).toBe(
+      `/videos/${initBody.videoId}/status`,
+    );
     const { videoId, shortCode } = initBody;
 
     expect(videoId).toBeDefined();

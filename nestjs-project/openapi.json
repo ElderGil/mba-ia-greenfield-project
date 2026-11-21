@@ -457,6 +457,14 @@
         "responses": {
           "201": {
             "description": "Draft video created and multipart upload initiated",
+            "headers": {
+              "Location": {
+                "description": "Status URL of the created draft",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

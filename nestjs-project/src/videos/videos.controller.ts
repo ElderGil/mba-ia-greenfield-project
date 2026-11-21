@@ -94,6 +94,12 @@ export class VideosController {
     status: 201,
     description: 'Draft video created and multipart upload initiated',
     type: InitiateUploadResponseDto,
+    headers: {
+      Location: {
+        description: 'Status URL of the created draft',
+        schema: { type: 'string' },
+      },
+    },
   })
   @ApiResponse({
     status: 400,
@@ -132,8 +138,11 @@ export class VideosController {
   async initiateUpload(
     @CurrentUser() user: JwtPayload,
     @Body() dto: InitiateUploadDto,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<InitiateUploadResponseDto> {
-    return this.videosUploadService.initiateUpload(user.sub, dto);
+    const draft = await this.videosUploadService.initiateUpload(user.sub, dto);
+    response.location(`/videos/${draft.videoId}/status`);
+    return draft;
   }
 
   @Post(':id/uploads/parts')
