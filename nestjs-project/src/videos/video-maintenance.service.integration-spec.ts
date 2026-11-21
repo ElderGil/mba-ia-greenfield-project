@@ -4,11 +4,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
-import { Channel } from '../channels/entities/channel.entity';
 import databaseConfig from '../config/database.config';
 import queueConfig, { bullRootOptions } from '../config/queue.config';
 import storageConfig from '../config/storage.config';
@@ -17,6 +14,8 @@ import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
 import { deferred, settled } from '../test/deferred';
+import { ALL_ENTITIES } from '../test/test-entities';
+import { TestMultipartUploads } from '../test/test-multipart-uploads';
 import { User } from '../users/entities/user.entity';
 import { VideoInvalidStateException } from '../common/exceptions/domain.exception';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -38,6 +37,7 @@ describe('VideoMaintenanceService (integration)', () => {
   let userRepo: Repository<User>;
   let videoRepo: Repository<Video>;
   let queue: Queue<VideoProcessingJobData>;
+  const multipartUploads = new TestMultipartUploads();
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
@@ -55,7 +55,7 @@ describe('VideoMaintenanceService (integration)', () => {
             username: dbCfg.username,
             password: dbCfg.password,
             database: dbCfg.name,
-            entities: [User, Channel, RefreshToken, VerificationToken, Video],
+            entities: ALL_ENTITIES,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
@@ -98,6 +98,10 @@ describe('VideoMaintenanceService (integration)', () => {
     await queue.obliterate({ force: true });
   });
 
+  afterEach(async () => {
+    await multipartUploads.abortRemaining(storageService);
+  });
+
   let counter = 0;
   async function createOwnerId(): Promise<string> {
     const user = await userRepo.save(
@@ -112,12 +116,13 @@ describe('VideoMaintenanceService (integration)', () => {
   }
 
   async function initiate(userId: string) {
-    return uploadService.initiateUpload(userId, {
+    const upload = await uploadService.initiateUpload(userId, {
       title: 'Clip',
       filename: 'clip.mp4',
       mimeType: 'video/mp4',
       sizeBytes: 1024,
     });
+    return multipartUploads.track(upload);
   }
 
   async function age(
@@ -152,8 +157,6 @@ describe('VideoMaintenanceService (integration)', () => {
     );
     const put = await fetch(url, { method: 'PUT', body: 'x' });
     expect(put.status).toBe(404);
-
-    await storageService.abortMultipartUpload(fresh.storageKey, fresh.uploadId);
   });
 
   it('fails processing videos stuck past the threshold without a live job and leaves the rest alone', async () => {
