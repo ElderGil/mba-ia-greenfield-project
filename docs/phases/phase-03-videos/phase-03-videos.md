@@ -122,7 +122,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 
 **Acceptance criteria:**
 
-- Enqueuing a `process-video` job persists the job in real Redis with `{ videoId, channelId, storageKey, mimeType }` and `attempts: 3`.
+- Enqueuing a `process-video` job persists the job in real Redis with `{ videoId, channelId, storageKey, mimeType }` and `attempts: 3`. _Revised 2026-11-20 (round 5): the payload is `{ videoId }` only; the worker reads the rest from the row._
 
 ---
 
@@ -191,7 +191,7 @@ Entregar o módulo de vídeos no backend (`nestjs-project/`) com armazenamento e
 **Technical actions:**
 
 1. Create `src/videos/media-processor.service.ts`:
-   - `probeVideo(inputUrlOrPath: string)`: runs `ffprobe -v quiet -print_format json -show_format -show_streams <input>` via `execFile`, parsing `durationSeconds` (float), `width` (int), `height` (int), `codec` (`codec_name` of first video stream).
+   - `probeVideo(inputUrlOrPath: string)`: runs `ffprobe -v quiet -print_format json -show_format -show_streams <input>` via `execFile`, parsing `durationSeconds` (float), `width` (int), `height` (int), `codec` (`codec_name` of first video stream). _Revised 2026-11-20 (final review, round 5): `probeVideo(input, mimeType)` / `generateThumbnail(input, duration, mimeType)` force the demuxer from the stored MIME with a protocol whitelist, run ffprobe with `-v error -select_streams V:0 -show_entries …`, and ffmpeg maps `0:V:0` (first video track that is not cover art)._
    - `generateThumbnail(inputUrlOrPath: string, durationSeconds: number)`: computes target timestamp (`durationSeconds >= 1 ? 1 : 0`), runs `ffmpeg -y -ss <ts> -i <input> -vframes 1 -q:v 2 -f image2 <tempJpg>`, reads JPEG buffer, and cleans up temp file in `finally`.
 2. Create `src/videos/video-processing.processor.ts` (`@Processor(VIDEO_PROCESSING_QUEUE, { concurrency: 2 })` extending `WorkerHost`):
    - `process(job)`: fetches video row, obtains presigned GET URL (internal MinIO endpoint) for `storage_key` (or downloads to temp file if needed), calls `probeVideo` + `generateThumbnail`, uploads JPEG to `thumbnails/{channelId}/{videoId}/thumb.jpg` via `S3StorageService.putObject`, updates `Video` (`status = 'ready'`, `thumbnail_key`, `duration_seconds`, `width`, `height`, `codec`; _Revised 2026-11-20 (final review)_: `size_bytes` is set by the API from `HeadObject` at complete, not by the worker, `processing_error = null`).

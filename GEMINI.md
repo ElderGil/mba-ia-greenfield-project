@@ -120,3 +120,11 @@ Always:
 - Cross-reference APIs to avoid deprecated or incompatible patterns
 - Follow the official documentation over training data
 
+Skip documentation lookup only for trivial operations such as:
+
+- Variable declarations
+- Basic control flow
+- Simple CRUD using established project patterns
+
+If a library is involved and there is uncertainty, documentation lookup is mandatory.
+If the documentation returned does not match the installed version, flag the discrepancy before proceeding.
