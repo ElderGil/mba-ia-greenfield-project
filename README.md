@@ -306,15 +306,16 @@ A Fase 03 foi implementada no **Google Antigravity** com o **Gemini 4 Hydrogen**
 | Plano (11 itens de implementação) | [phase-03-videos.md](./docs/phases/phase-03-videos/phase-03-videos.md) |
 | Progresso, revisões e evidências | [progress.md](./docs/phases/phase-03-videos/progress.md) |
 
-Depois da entrega, o código passou por revisão em par (construtor e auditor com papéis fixos, portão humano no fim de cada rodada). Nas rodadas 4 e 5, cada correção de comportamento entrou com um teste visto falhando antes dela:
+Depois da entrega, o código passou por revisão em par (construtor e auditor com papéis fixos, portão humano no fim de cada rodada). Da rodada 4 em diante, cada correção de comportamento entrou com um teste visto falhando antes dela:
 
 | Rodada | Construtor → Auditor | O que entrou |
 |---|---|---|
-| 1 | Antigravity → Claude Code | Reprovada: `npm run lint` com 147 erros herdados do starter e MCP não portado. Correções escritas pelo Claude Code. |
-| 2 e 3 | Claude Code → Antigravity | Auditoria dessas correções; falha no `HeadObject` depois do `complete` passou a terminar em `failed`. |
+| 1 | Antigravity → Claude Code | Reprovada: `npm run lint` com 147 erros herdados do starter e MCP não portado. O Claude Code escreveu as correções, o Antigravity adotou e a rodada fechou aprovada. |
+| 2 | Claude Code → Antigravity | Auditoria independente das correções da rodada 1. |
+| 3 | Claude Code → Antigravity | Falha no `HeadObject` depois do `complete` passou a terminar em `failed`. |
 | 4 | Claude Code → Antigravity | Correções de um pente fino independente (Claude Fable 5.2): download com nome Unicode, SIGTERM no worker, demuxer forçado (SSRF), URLs fora dos erros, varredura, retomada de upload, rules portadas no formato que o Antigravity carrega. |
 | 5 | Claude Code → Antigravity | Correções de uma revisão externa que reconstruiu a stack do zero: testes isolados do banco de dev, disputa concluir × cancelar, condicionais HTTP, worker que não sobrescreve estado final, teste real de 10 GiB. |
-| 6 | Claude Code, Codex e Antigravity → Claude Code e Codex | Revisão de engenharia com leitura integral do repositório: setup HTTP único para `main.ts` e e2e, parser de 1 MB só no `POST` do `complete`, Mailpit preservado, CI do backend, Swagger com a config certa, log do worker sem URL, multipart sem draft cancelado pela varredura, throttle do `initiate` por usuário, `Location` no `201` e erros do framework documentados com o formato real. A primeira submissão foi reprovada por misturar mudanças das Fases 01/02 e editar a fundação do template; elas saíram desta entrega e os problemas estão nas dúvidas abaixo. |
+| 6 | Codex e Antigravity → Claude Code; reorganização: Claude Code → Codex | Revisão de engenharia com leitura integral do repositório: setup HTTP único para `main.ts` e e2e, parser de 1 MB só no `POST` do `complete`, Mailpit preservado, CI do backend, Swagger com a config certa, log do worker sem URL, multipart sem draft cancelado pela varredura, throttle do `initiate` por usuário, `Location` no `201` e erros do framework documentados com o formato real. A primeira submissão foi reprovada por misturar mudanças das Fases 01/02 e editar a fundação do template; o Claude Code reconstruiu a entrega só com a Fase 03 e os problemas de fora estão nas dúvidas abaixo. Na revisão da reorganização, o Codex pediu o isolamento da varredura nos testes, URLs redigidas nos logs dela e o `413` do parser no contrato. |
 
 Achados, decisões e o que ficou de fora estão no [progress.md](./docs/phases/phase-03-videos/progress.md).
 
