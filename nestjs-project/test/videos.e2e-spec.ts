@@ -482,6 +482,14 @@ describe('Videos (e2e)', () => {
       .expect(200);
   }, 30000);
 
+  it('keeps the default 100 kB JSON limit on every route except complete-upload', async () => {
+    // Only complete-upload needs room for up to 10 000 part ETags.
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'big@example.com', password: 'x'.repeat(200_000) })
+      .expect(413);
+  });
+
   it('caps open drafts per channel and rate-limits upload initiation', async () => {
     const { accessToken } = await registerConfirmAndLogin('limits');
     const initiate = (mimeType = 'video/mp4') =>

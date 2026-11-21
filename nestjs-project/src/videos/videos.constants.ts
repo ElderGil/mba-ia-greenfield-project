@@ -23,7 +23,10 @@ export function videoFormatOf(
 export const MAX_MULTIPART_PARTS = 10000;
 
 // The complete body may list MAX_MULTIPART_PARTS ETags (about 550 kB of
-// JSON), above the 100 kB default (see configureApp).
+// JSON), above the 100 kB default; only this route gets the larger limit
+// (configureApp). The e2e test with 10 000 parts fails if the path drifts
+// from the controller's route.
+export const COMPLETE_UPLOAD_ROUTE = '/videos/:id/uploads/complete';
 export const COMPLETE_UPLOAD_JSON_LIMIT = '1mb';
 
 // Upload initiation is the only video route under the global throttler:
