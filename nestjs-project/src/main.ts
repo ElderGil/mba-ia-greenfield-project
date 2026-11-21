@@ -1,12 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import type { ConfigType } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
-import swaggerConfig from './config/swagger.config';
-import { buildSwaggerDocument } from './swagger/swagger-document';
+import { setupSwagger } from './swagger/swagger-document';
 import swaggerMetadata from './metadata.js';
 
 async function bootstrap() {
@@ -15,16 +12,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port') ?? 3000;
 
-  const swagger = app.get<ConfigType<typeof swaggerConfig>>(swaggerConfig.KEY);
-
-  if (swagger.enabled) {
-    await SwaggerModule.loadPluginMetadata(swaggerMetadata);
-    const document = buildSwaggerDocument(app);
-    SwaggerModule.setup('api/docs', app, document, {
-      customSiteTitle: 'StreamTube API Docs',
-      swaggerOptions: { persistAuthorization: true },
-    });
-  }
+  await setupSwagger(app, swaggerMetadata);
 
   await app.listen(port);
 }

@@ -1,14 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
-import { buildSwaggerConfig } from '../src/swagger/swagger-document';
+import { setupSwagger } from '../src/swagger/swagger-document';
 
-async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
+async function createApp(): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
@@ -16,14 +15,7 @@ async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
   const app = moduleFixture.createNestApplication<NestExpressApplication>();
   configureApp(app);
 
-  if (withSwagger) {
-    const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
-    SwaggerModule.setup('api/docs', app, document, {
-      customSiteTitle: 'StreamTube API Docs',
-      swaggerOptions: { persistAuthorization: true },
-    });
-  }
-
+  await setupSwagger(app);
   await app.init();
   return app;
 }
@@ -34,7 +26,7 @@ describe('Swagger endpoints (e2e)', () => {
 
     beforeAll(async () => {
       process.env.SWAGGER_ENABLED = 'true';
-      app = await createApp(true);
+      app = await createApp();
     });
 
     afterAll(async () => {
@@ -67,6 +59,10 @@ describe('Swagger endpoints (e2e)', () => {
       ).toMatchObject({
         'access-token': { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       });
+      expect(doc.components).toHaveProperty(
+        'schemas.ApiErrorEnvelope.type',
+        'object',
+      );
     });
 
     it('GET /api/docs-yaml returns 200 with YAML content', async () => {
@@ -82,7 +78,7 @@ describe('Swagger endpoints (e2e)', () => {
 
     beforeAll(async () => {
       delete process.env.SWAGGER_ENABLED;
-      app = await createApp(false);
+      app = await createApp();
     });
 
     afterAll(async () => {
