@@ -19,8 +19,14 @@ export function configureApp(app: NestExpressApplication): void {
   // parser if it finds a middleware named "jsonParser", which would leave
   // every other route unparsed. A body read here is not read again.
   const parseLargeJson = json({ limit: COMPLETE_UPLOAD_JSON_LIMIT });
-  const completeUploadJsonParser: RequestHandler = (req, res, next) =>
-    parseLargeJson(req, res, next);
+  const completeUploadJsonParser: RequestHandler = (req, res, next) => {
+    // Express mounts app.use() for all methods and on descendant paths.
+    if (req.method === 'POST' && req.path === '/') {
+      parseLargeJson(req, res, next);
+    } else {
+      next();
+    }
+  };
   app.use(COMPLETE_UPLOAD_ROUTE, completeUploadJsonParser);
 
   app.useGlobalPipes(

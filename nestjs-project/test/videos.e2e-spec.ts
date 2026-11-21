@@ -488,6 +488,11 @@ describe('Videos (e2e)', () => {
       .post('/auth/login')
       .send({ email: 'big@example.com', password: 'x'.repeat(200_000) })
       .expect(413);
+
+    await request(app.getHttpServer())
+      .post(`/videos/${randomUUID()}/uploads/complete/unknown`)
+      .send({ value: 'x'.repeat(200_000) })
+      .expect(413);
   });
 
   it('caps open drafts per channel and rate-limits upload initiation', async () => {
