@@ -1,8 +1,11 @@
 import type { INestApplication } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { ApiHttpError } from '../common/openapi/api-http-error.dto';
+import swaggerConfig from '../config/swagger.config';
 
-export function buildSwaggerConfig() {
+function buildSwaggerConfig() {
   return new DocumentBuilder()
     .setTitle('StreamTube API')
     .setDescription('API REST do StreamTube')
@@ -16,6 +19,20 @@ export function buildSwaggerConfig() {
 
 export function buildSwaggerDocument(app: INestApplication) {
   return SwaggerModule.createDocument(app, buildSwaggerConfig(), {
-    extraModels: [ApiErrorEnvelope],
+    extraModels: [ApiErrorEnvelope, ApiHttpError],
+  });
+}
+
+export async function setupSwagger(
+  app: INestApplication,
+  metadata?: Parameters<typeof SwaggerModule.loadPluginMetadata>[0],
+): Promise<void> {
+  const config = app.get<ConfigType<typeof swaggerConfig>>(swaggerConfig.KEY);
+  if (!config.enabled) return;
+
+  if (metadata) await SwaggerModule.loadPluginMetadata(metadata);
+  SwaggerModule.setup('api/docs', app, buildSwaggerDocument(app), {
+    customSiteTitle: 'StreamTube API Docs',
+    swaggerOptions: { persistAuthorization: true },
   });
 }

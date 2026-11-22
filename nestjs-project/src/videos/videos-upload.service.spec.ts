@@ -1,7 +1,6 @@
-import { IsNull } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { QueryFailedError } from 'typeorm';
+import { IsNull, QueryFailedError } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
@@ -23,12 +22,12 @@ describe('VideosUploadService', () => {
   let service: VideosUploadService;
 
   const mockVideoRepo = {
-    create: jest.fn((input: Partial<Video>) => ({ ...input })),
+    create: jest.fn(),
     save: jest.fn(),
     findOne: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
-    count: jest.fn().mockResolvedValue(0),
+    count: jest.fn(),
   };
 
   const mockChannelsService = {
@@ -40,7 +39,7 @@ describe('VideosUploadService', () => {
     getPresignedPartUrl: jest.fn(),
     completeMultipartUpload: jest.fn(),
     abortMultipartUpload: jest.fn(),
-    listUploadedParts: jest.fn().mockResolvedValue([]),
+    listUploadedParts: jest.fn(),
     headObject: jest.fn(),
     deleteObject: jest.fn(),
   };
@@ -57,8 +56,12 @@ describe('VideosUploadService', () => {
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    mockVideoRepo.create.mockImplementation((input: Partial<Video>) => ({
+      ...input,
+    }));
     mockVideoRepo.count.mockResolvedValue(0);
+    mockStorageService.listUploadedParts.mockResolvedValue([]);
     const module = await Test.createTestingModule({
       providers: [
         VideosUploadService,

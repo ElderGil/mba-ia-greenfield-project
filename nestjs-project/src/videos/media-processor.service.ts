@@ -65,11 +65,6 @@ interface FfprobeOutput {
   streams?: FfprobeStream[];
 }
 
-// The demuxer is forced from the MIME the upload declared (VIDEO_FORMATS).
-// Left to auto-detection, ffprobe/ffmpeg accept images (PNG/GIF) as "video"
-// and open an HLS playlist disguised as .mp4, fetching every URL it lists
-// from inside the worker (SSRF).
-
 // `V` (capital) selects video streams that are not attached pictures: the
 // cover art of an audio file is listed as a video stream, and would
 // otherwise pass as the video (an mp3-like file published as "video").
@@ -77,6 +72,8 @@ interface FfprobeOutput {
 // track the metadata describes.
 const VIDEO_TRACK = 'V:0';
 
+// Force the demuxer from the declared MIME to reject images and playlists
+// before they can be processed as video or trigger secondary URL requests.
 function inputArgs(inputUrlOrPath: string, mimeType: string): string[] {
   const demuxer = videoFormatOf(mimeType)?.demuxer;
   if (!demuxer) {

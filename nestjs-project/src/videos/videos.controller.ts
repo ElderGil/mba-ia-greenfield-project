@@ -26,6 +26,7 @@ import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { ApiHttpError } from '../common/openapi/api-http-error.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { SignUploadPartDto } from './dto/sign-upload-part.dto';
@@ -42,7 +43,9 @@ import {
   selectRange,
   sendMedia,
 } from './videos-http.util';
+import { VideosUploadService } from './videos-upload.service';
 import { INITIATE_UPLOAD_THROTTLE, VIDEO_MIME_TYPES } from './videos.constants';
+import { VideosService } from './videos.service';
 
 const INVALID_ID_RESPONSE = {
   status: 400,
@@ -59,8 +62,12 @@ function binaryBody(types: readonly string[]): Record<string, object> {
     ]),
   );
 }
-import { VideosUploadService } from './videos-upload.service';
-import { VideosService } from './videos.service';
+
+// JwtAuthGuard runs before ThrottlerGuard, so the initiate limit counts per
+// user; behind a proxy every client would otherwise share one IP.
+function uploaderTracker(req: Request & { user?: JwtPayload }): string {
+  return req.user?.sub ? `user:${req.user.sub}` : `ip:${req.ip ?? 'unknown'}`;
+}
 
 @SkipThrottle()
 @ApiTags('videos')
@@ -75,7 +82,9 @@ export class VideosController {
 
   @Post('uploads/initiate')
   @SkipThrottle({ default: false })
-  @Throttle({ default: INITIATE_UPLOAD_THROTTLE })
+  @Throttle({
+    default: { ...INITIATE_UPLOAD_THROTTLE, getTracker: uploaderTracker },
+  })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Initiate multipart video upload',
@@ -86,6 +95,12 @@ export class VideosController {
     status: 201,
     description: 'Draft video created and multipart upload initiated',
     type: InitiateUploadResponseDto,
+    headers: {
+      Location: {
+        description: 'Status URL of the created draft',
+        schema: { type: 'string' },
+      },
+    },
   })
   @ApiResponse({
     status: 400,
@@ -95,7 +110,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 404,
@@ -104,8 +119,14 @@ export class VideosController {
   })
   @ApiResponse({
     status: 413,
-    description: 'Video size exceeds 10 GiB limit',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    description:
+      'Declared video size exceeds 10 GiB, or JSON body over the 100 kB parser limit',
+    schema: {
+      anyOf: [
+        { $ref: getSchemaPath(ApiErrorEnvelope) },
+        { $ref: getSchemaPath(ApiHttpError) },
+      ],
+    },
   })
   @ApiResponse({
     status: 415,
@@ -120,12 +141,16 @@ export class VideosController {
   @ApiResponse({
     status: 429,
     description: 'Too many upload initiations; retry later',
+    type: ApiHttpError,
   })
   async initiateUpload(
     @CurrentUser() user: JwtPayload,
     @Body() dto: InitiateUploadDto,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<InitiateUploadResponseDto> {
-    return this.videosUploadService.initiateUpload(user.sub, dto);
+    const draft = await this.videosUploadService.initiateUpload(user.sub, dto);
+    response.location(`/videos/${draft.videoId}/status`);
+    return draft;
   }
 
   @Post(':id/uploads/parts')
@@ -150,7 +175,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -166,6 +191,11 @@ export class VideosController {
     status: 409,
     description: 'Video is not in draft status',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 413,
+    description: 'JSON body over the 100 kB parser limit',
+    type: ApiHttpError,
   })
   async signUploadPart(
     @CurrentUser() user: JwtPayload,
@@ -196,7 +226,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -246,7 +276,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -265,8 +295,13 @@ export class VideosController {
   })
   @ApiResponse({
     status: 413,
-    description: 'Completed object size exceeds 10 GiB limit',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    description: 'JSON request or completed media exceeds its size limit',
+    schema: {
+      anyOf: [
+        { $ref: getSchemaPath(ApiErrorEnvelope) },
+        { $ref: getSchemaPath(ApiHttpError) },
+      ],
+    },
   })
   async completeUpload(
     @CurrentUser() user: JwtPayload,
@@ -290,7 +325,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,
@@ -329,6 +364,11 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
+    type: ApiHttpError,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Channel not found for user',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async listMyVideos(
@@ -355,7 +395,7 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
-    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+    type: ApiHttpError,
   })
   @ApiResponse({
     status: 403,

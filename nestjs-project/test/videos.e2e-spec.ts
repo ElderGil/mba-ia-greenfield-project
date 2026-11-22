@@ -16,6 +16,7 @@ import { configureApp } from '../src/app.setup';
 import { MailService } from '../src/mail/mail.service';
 import { S3StorageService } from '../src/storage/s3-storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+import { TestMultipartUploads } from '../src/test/test-multipart-uploads';
 import {
   CompleteUploadResponseDto,
   InitiateUploadResponseDto,
@@ -24,9 +25,19 @@ import {
   VideoPublicResponseDto,
 } from '../src/videos/dto/video-response.dto';
 import { Video, VideoStatus } from '../src/videos/entities/video.entity';
+import { VideoMaintenanceProcessor } from '../src/videos/video-maintenance.processor';
 import { WorkerModule } from '../src/worker.module';
 
 const execFileAsync = promisify(execFile);
+
+function binaryBody(
+  res: request.Response,
+  cb: (err: Error | null, body: Buffer) => void,
+): void {
+  const chunks: Buffer[] = [];
+  res.on('data', (chunk: Buffer) => chunks.push(chunk));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+}
 
 interface ErrorBody {
   statusCode: number;
@@ -49,6 +60,7 @@ describe('Videos (e2e)', () => {
   let throttlerStorage: ThrottlerStorageService;
   let sampleMp4: Buffer;
   const createdStorageKeys: string[] = [];
+  const multipartUploads = new TestMultipartUploads();
 
   beforeAll(async () => {
     const tmpMp4 = path.join(os.tmpdir(), `e2e-sample-${randomUUID()}.mp4`);
@@ -79,9 +91,15 @@ describe('Videos (e2e)', () => {
     app = expressApp;
     await app.init();
 
+    // The real worker processes the videos; the maintenance scheduler is
+    // replaced so a sweep on worker init cannot change rows while a case
+    // runs. VideoMaintenanceService has its own suite.
     const workerFixture = await Test.createTestingModule({
       imports: [WorkerModule],
-    }).compile();
+    })
+      .overrideProvider(VideoMaintenanceProcessor)
+      .useValue({})
+      .compile();
     workerApp = await workerFixture.init();
 
     dataSource = moduleFixture.get(DataSource);
@@ -104,6 +122,17 @@ describe('Videos (e2e)', () => {
     await cleanAllTables(dataSource);
     throttlerStorage.storage.clear();
   });
+
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await multipartUploads.abortRemaining(storageService);
+  });
+
+  function trackDraft(res: request.Response): InitiateUploadResponseDto {
+    const draft = multipartUploads.track(res.body as InitiateUploadResponseDto);
+    createdStorageKeys.push(draft.storageKey);
+    return draft;
+  }
 
   let userCounter = 0;
   async function registerConfirmAndLogin(
@@ -178,9 +207,11 @@ describe('Videos (e2e)', () => {
       })
       .expect(201);
 
-    const initBody = initRes.body as InitiateUploadResponseDto;
-    const { videoId, shortCode, storageKey } = initBody;
-    createdStorageKeys.push(storageKey);
+    const initBody = trackDraft(initRes);
+    expect(initRes.headers['location']).toBe(
+      `/videos/${initBody.videoId}/status`,
+    );
+    const { videoId, shortCode } = initBody;
 
     expect(videoId).toBeDefined();
     expect(shortCode).toMatch(/^[A-Za-z0-9_-]{11}$/);
@@ -264,11 +295,7 @@ describe('Videos (e2e)', () => {
     const thumbRes = await request(app.getHttpServer())
       .get(`/videos/${shortCode}/thumbnail`)
       .buffer(true)
-      .parse((res, cb) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => cb(null, Buffer.concat(chunks)));
-      })
+      .parse(binaryBody)
       .expect(200);
     expect(thumbRes.headers['content-type']).toContain('image/jpeg');
     const thumbBuf = thumbRes.body as Buffer;
@@ -289,11 +316,7 @@ describe('Videos (e2e)', () => {
       .get(`/videos/${shortCode}/stream`)
       .set('Range', 'bytes=0-511')
       .buffer(true)
-      .parse((res, cb) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => cb(null, Buffer.concat(chunks)));
-      })
+      .parse(binaryBody)
       .expect(206);
 
     expect(streamRes1.headers['accept-ranges']).toBe('bytes');
@@ -308,11 +331,7 @@ describe('Videos (e2e)', () => {
       .get(`/videos/${shortCode}/stream`)
       .set('Range', 'bytes=512-1023')
       .buffer(true)
-      .parse((res, cb) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => cb(null, Buffer.concat(chunks)));
-      })
+      .parse(binaryBody)
       .expect(206);
 
     expect(
@@ -333,11 +352,7 @@ describe('Videos (e2e)', () => {
     const downloadRes = await request(app.getHttpServer())
       .get(`/videos/${shortCode}/download`)
       .buffer(true)
-      .parse((res, cb) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => cb(null, Buffer.concat(chunks)));
-      })
+      .parse(binaryBody)
       .expect(200);
 
     expect(downloadRes.headers['content-disposition']).toBe(
@@ -360,9 +375,7 @@ describe('Videos (e2e)', () => {
         sizeBytes: sampleMp4.length,
       })
       .expect(201);
-    const { videoId, shortCode, storageKey } =
-      initRes.body as InitiateUploadResponseDto;
-    createdStorageKeys.push(storageKey);
+    const { videoId, shortCode } = trackDraft(initRes);
 
     const partRes = await request(app.getHttpServer())
       .post(`/videos/${videoId}/uploads/parts`)
@@ -396,11 +409,7 @@ describe('Videos (e2e)', () => {
     const downloadRes = await request(app.getHttpServer())
       .get(`/videos/${shortCode}/download`)
       .buffer(true)
-      .parse((res, cb) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => cb(null, Buffer.concat(chunks)));
-      })
+      .parse(binaryBody)
       .expect(200);
     expect(downloadRes.headers['content-disposition']).toBe(
       `attachment; filename="Aula 01 _ Introducao.mp4"; filename*=UTF-8''Aula%2001%20%E2%80%93%20Introdu%C3%A7%C3%A3o.mp4`,
@@ -436,14 +445,6 @@ describe('Videos (e2e)', () => {
     const { accessToken } = await registerConfirmAndLogin('conditionals');
     const { shortCode } = await uploadReadyVideo(accessToken, 'cond.mp4');
     const url = `/videos/${shortCode}/stream`;
-    const binary = (
-      res: request.Response,
-      cb: (err: Error | null, body: Buffer) => void,
-    ) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
-      res.on('end', () => cb(null, Buffer.concat(chunks)));
-    };
     const full = await request(app.getHttpServer()).get(url).expect(200);
     const etag: string = full.headers['etag'];
 
@@ -460,7 +461,7 @@ describe('Videos (e2e)', () => {
       .set('If-Range', '"stale-etag"')
       .set('Range', 'bytes=0-99')
       .buffer(true)
-      .parse(binary)
+      .parse(binaryBody)
       .expect(200);
     expect(stale.headers['content-range']).toBeUndefined();
     expect(Buffer.compare(stale.body as Buffer, sampleMp4)).toBe(0);
@@ -488,6 +489,25 @@ describe('Videos (e2e)', () => {
       .post('/auth/login')
       .send({ email: 'big@example.com', password: 'x'.repeat(200_000) })
       .expect(413);
+
+    await request(app.getHttpServer())
+      .post(`/videos/${randomUUID()}/uploads/complete/unknown`)
+      .send({ value: 'x'.repeat(200_000) })
+      .expect(413);
+
+    // The parser answers before the controller, in the framework shape the
+    // OpenAPI documents as ApiHttpError on initiate and parts.
+    for (const path of [
+      '/videos/uploads/initiate',
+      `/videos/${randomUUID()}/uploads/parts`,
+    ]) {
+      const tooLarge = await request(app.getHttpServer())
+        .post(path)
+        .send({ title: 'x'.repeat(200_000) })
+        .expect(413);
+      expect(tooLarge.body).toMatchObject({ statusCode: 413 });
+      expect(tooLarge.body).not.toHaveProperty('error');
+    }
   });
 
   it('caps open drafts per channel and rate-limits upload initiation', async () => {
@@ -500,16 +520,30 @@ describe('Videos (e2e)', () => {
 
     for (let i = 0; i < 5; i++) {
       const res = await initiate().expect(201);
-      createdStorageKeys.push(
-        (res.body as InitiateUploadResponseDto).storageKey,
-      );
+      trackDraft(res);
     }
     const capped = await initiate().expect(409);
     expect((capped.body as ErrorBody).error).toBe('TOO_MANY_OPEN_UPLOADS');
 
     // 6 requests so far; rejected ones count too. The 11th within a minute is throttled.
     for (let i = 0; i < 4; i++) await initiate('application/pdf').expect(415);
-    await initiate('application/pdf').expect(429);
+    const throttled = await initiate('application/pdf').expect(429);
+    expect(throttled.body).toMatchObject({ statusCode: 429 });
+    expect(throttled.body).not.toHaveProperty('error');
+
+    // The limit is per user: another account can still initiate.
+    const anotherUser = await registerConfirmAndLogin('limits_other_user');
+    const anotherDraft = await request(app.getHttpServer())
+      .post('/videos/uploads/initiate')
+      .set('Authorization', `Bearer ${anotherUser.accessToken}`)
+      .send({
+        title: 'Draft',
+        filename: 'b.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: 1024,
+      })
+      .expect(201);
+    trackDraft(anotherDraft);
 
     // Public media routes stay unthrottled (players issue many range requests).
     for (let i = 0; i < 12; i++) {
@@ -531,8 +565,7 @@ describe('Videos (e2e)', () => {
         sizeBytes: 1024,
       })
       .expect(201);
-    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
-    createdStorageKeys.push(storageKey);
+    const { videoId } = trackDraft(init);
     const parts = (n: number) =>
       Array.from({ length: n }, (_, i) => ({
         partNumber: Math.min(i + 1, 10000),
@@ -569,8 +602,7 @@ describe('Videos (e2e)', () => {
         sizeBytes: sampleMp4.length,
       })
       .expect(201);
-    const { videoId, storageKey } = init.body as InitiateUploadResponseDto;
-    createdStorageKeys.push(storageKey);
+    const { videoId } = trackDraft(init);
     const signed = await request(app.getHttpServer())
       .post(`/videos/${videoId}/uploads/parts`)
       .set('Authorization', `Bearer ${accessToken}`)
@@ -633,6 +665,7 @@ describe('Videos (e2e)', () => {
       })
       .expect(201);
 
+    const first = trackDraft(res1);
     const res2 = await request(app.getHttpServer())
       .post('/videos/uploads/initiate')
       .set('Authorization', `Bearer ${accessToken}`)
@@ -644,14 +677,13 @@ describe('Videos (e2e)', () => {
       })
       .expect(201);
 
-    expect((res1.body as InitiateUploadResponseDto).shortCode).not.toBe(
-      (res2.body as InitiateUploadResponseDto).shortCode,
-    );
+    const second = trackDraft(res2);
+    expect(first.shortCode).not.toBe(second.shortCode);
   });
 
   it('enforces auth, size/MIME limits, validation, ownership, and abort cleanup', async () => {
-    // Unauthenticated initiate -> 401
-    await request(app.getHttpServer())
+    // Unauthenticated initiate -> 401 in the framework shape (ApiHttpError)
+    const unauthenticated = await request(app.getHttpServer())
       .post('/videos/uploads/initiate')
       .send({
         title: 'No Auth',
@@ -660,6 +692,10 @@ describe('Videos (e2e)', () => {
         sizeBytes: 1024,
       })
       .expect(401);
+    expect(unauthenticated.body).toEqual({
+      statusCode: 401,
+      message: 'Unauthorized',
+    });
 
     const owner = await registerConfirmAndLogin('owner');
     const otherUser = await registerConfirmAndLogin('other');
@@ -728,7 +764,7 @@ describe('Videos (e2e)', () => {
         sizeBytes: 1024,
       })
       .expect(201);
-    const draftId = (initRes.body as InitiateUploadResponseDto).videoId;
+    const draftId = trackDraft(initRes).videoId;
 
     // Cross-user access -> 403 VIDEO_ACCESS_DENIED
     const forbidden = await request(app.getHttpServer())
@@ -768,8 +804,7 @@ describe('Videos (e2e)', () => {
       })
       .expect(201);
 
-    const { videoId, storageKey } = initRes.body as InitiateUploadResponseDto;
-    createdStorageKeys.push(storageKey);
+    const { videoId } = trackDraft(initRes);
 
     const partRes = await request(app.getHttpServer())
       .post(`/videos/${videoId}/uploads/parts`)

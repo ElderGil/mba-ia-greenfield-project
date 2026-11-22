@@ -7,8 +7,10 @@ describe('storageConfig', () => {
   };
 
   afterEach(() => {
-    process.env.S3_ACCESS_KEY_ID = saved.id;
-    process.env.S3_SECRET_ACCESS_KEY = saved.secret;
+    if (saved.id === undefined) delete process.env.S3_ACCESS_KEY_ID;
+    else process.env.S3_ACCESS_KEY_ID = saved.id;
+    if (saved.secret === undefined) delete process.env.S3_SECRET_ACCESS_KEY;
+    else process.env.S3_SECRET_ACCESS_KEY = saved.secret;
   });
 
   it('should not fall back to well-known credentials when none are set', () => {

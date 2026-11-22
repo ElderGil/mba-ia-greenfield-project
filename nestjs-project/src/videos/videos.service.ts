@@ -5,11 +5,11 @@ import { ChannelsService } from '../channels/channels.service';
 import {
   ChannelNotFoundException,
   InvalidRangeException,
-  VideoAccessDeniedException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
+import { findOwnedVideo } from './video-ownership';
 import type { OpenedMedia } from './videos-http.util';
 
 export interface ParsedByteRange {
@@ -71,23 +71,12 @@ export class VideosService {
   }
 
   async getVideoByIdForOwner(userId: string, videoId: string): Promise<Video> {
-    const channel = await this.channelsService.findByUserId(userId);
-    if (!channel) {
-      throw new ChannelNotFoundException();
-    }
-
-    const video = await this.videoRepository.findOne({
-      where: { id: videoId },
-    });
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-
-    if (video.channel_id !== channel.id) {
-      throw new VideoAccessDeniedException();
-    }
-
-    return video;
+    return findOwnedVideo(
+      this.videoRepository,
+      this.channelsService,
+      userId,
+      videoId,
+    );
   }
 
   async getReadyVideoByShortCode(shortCode: string): Promise<Video> {
