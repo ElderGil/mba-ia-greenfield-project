@@ -15,7 +15,7 @@ describe('VideoMaintenanceProcessor', () => {
   let processor: VideoMaintenanceProcessor;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     const module = await Test.createTestingModule({
       providers: [
         VideoMaintenanceProcessor,

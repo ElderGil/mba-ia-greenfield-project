@@ -2,11 +2,8 @@ import { Test } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import appConfig from '../config/app.config';
 import mailConfig from '../config/mail.config';
-import {
-  clearMailpitMessages,
-  getMailpitMessage,
-  getMailpitMessages,
-} from '../test/mailpit';
+import { randomUUID } from 'node:crypto';
+import { getMailpitMessage, getMailpitMessagesTo } from '../test/mailpit';
 import { MAIL_SUBJECTS } from './mail.constants';
 import { MailModule } from './mail.module';
 import { MailService } from './mail.service';
@@ -25,31 +22,26 @@ describe('MailService (integration)', () => {
     mailService = module.get(MailService);
   });
 
-  beforeEach(async () => {
-    await clearMailpitMessages();
+  // Mailpit is shared with the running stack: each test gets its own
+  // recipient and reads only its messages.
+  let recipient: string;
+  beforeEach(() => {
+    recipient = `mail_${randomUUID()}@example.com`;
   });
 
   it('sendConfirmationEmail delivers to Mailpit with correct subject and recipient', async () => {
-    await mailService.sendConfirmationEmail(
-      'user@example.com',
-      'Alice',
-      'token123',
-    );
+    await mailService.sendConfirmationEmail(recipient, 'Alice', 'token123');
 
-    const messages = await getMailpitMessages();
+    const messages = await getMailpitMessagesTo(recipient);
     expect(messages).toHaveLength(1);
-    expect(messages[0].To[0].Address).toBe('user@example.com');
+    expect(messages[0].To[0].Address).toBe(recipient);
     expect(messages[0].Subject).toBe(MAIL_SUBJECTS.CONFIRMATION);
   });
 
   it('sendConfirmationEmail renders the confirmation URL in the body', async () => {
-    await mailService.sendConfirmationEmail(
-      'user@example.com',
-      'Alice',
-      'mytoken',
-    );
+    await mailService.sendConfirmationEmail(recipient, 'Alice', 'mytoken');
 
-    const messages = await getMailpitMessages();
+    const messages = await getMailpitMessagesTo(recipient);
     const detail = await getMailpitMessage(messages[0].ID);
 
     expect(detail.HTML).toContain('mytoken');
@@ -58,26 +50,18 @@ describe('MailService (integration)', () => {
   });
 
   it('sendPasswordResetEmail delivers to Mailpit with correct subject and recipient', async () => {
-    await mailService.sendPasswordResetEmail(
-      'user@example.com',
-      'Bob',
-      'resettoken',
-    );
+    await mailService.sendPasswordResetEmail(recipient, 'Bob', 'resettoken');
 
-    const messages = await getMailpitMessages();
+    const messages = await getMailpitMessagesTo(recipient);
     expect(messages).toHaveLength(1);
-    expect(messages[0].To[0].Address).toBe('user@example.com');
+    expect(messages[0].To[0].Address).toBe(recipient);
     expect(messages[0].Subject).toBe(MAIL_SUBJECTS.PASSWORD_RESET);
   });
 
   it('sendPasswordResetEmail renders the reset URL and expiry notice in the body', async () => {
-    await mailService.sendPasswordResetEmail(
-      'user@example.com',
-      'Bob',
-      'resettoken',
-    );
+    await mailService.sendPasswordResetEmail(recipient, 'Bob', 'resettoken');
 
-    const messages = await getMailpitMessages();
+    const messages = await getMailpitMessagesTo(recipient);
     const detail = await getMailpitMessage(messages[0].ID);
 
     expect(detail.HTML).toContain('resettoken');
@@ -87,9 +71,9 @@ describe('MailService (integration)', () => {
   });
 
   it('both emails use the configured MAIL_FROM address as sender', async () => {
-    await mailService.sendConfirmationEmail('user@example.com', 'Alice', 'tok');
+    await mailService.sendConfirmationEmail(recipient, 'Alice', 'tok');
 
-    const messages = await getMailpitMessages();
+    const messages = await getMailpitMessagesTo(recipient);
     const configuredFrom =
       process.env.MAIL_FROM ?? '"StreamTube" <noreply@streamtube.com>';
     const expectedAddress =

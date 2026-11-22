@@ -25,7 +25,6 @@ import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
-import { clearMailpitMessages } from '../test/mailpit';
 import { AuthService } from './auth.service';
 import { RefreshToken } from './entities/refresh-token.entity';
 import {
@@ -115,7 +114,6 @@ describe('AuthService — register (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('persists a user, channel, and verification token on successful registration', async () => {
@@ -206,7 +204,6 @@ describe('AuthService — confirm (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('sets is_confirmed = true and used_at on valid token', async () => {
@@ -275,7 +272,6 @@ describe('AuthService — resendConfirmation (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('invalidates old tokens and creates a new confirmation token', async () => {
@@ -329,7 +325,6 @@ describe('AuthService — login (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   async function registerAndConfirmUser(
@@ -408,7 +403,6 @@ describe('AuthService — refresh (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('rotates token: revokes old token and persists new token in DB', async () => {
@@ -524,7 +518,6 @@ describe('AuthService — logout (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('revokes all active refresh tokens for the user after logout', async () => {
@@ -594,7 +587,6 @@ describe('AuthService — forgotPassword (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   it('persists a password reset token and sends an email containing the raw token', async () => {
@@ -679,7 +671,6 @@ describe('AuthService — resetPassword (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    await clearMailpitMessages();
   });
 
   async function registerConfirmAndRequestReset(

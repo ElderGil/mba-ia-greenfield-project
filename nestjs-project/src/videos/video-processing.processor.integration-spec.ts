@@ -9,16 +9,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
-import { Channel } from '../channels/entities/channel.entity';
 import databaseConfig from '../config/database.config';
 import storageConfig from '../config/storage.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
+import { ALL_ENTITIES } from '../test/test-entities';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from './entities/video.entity';
 import { MediaProcessorService } from './media-processor.service';
@@ -53,7 +51,7 @@ describe('VideoProcessingProcessor (integration with MinIO + FFmpeg + Postgres)'
             username: dbCfg.username,
             password: dbCfg.password,
             database: dbCfg.name,
-            entities: [User, Channel, RefreshToken, VerificationToken, Video],
+            entities: ALL_ENTITIES,
           }),
         }),
         TypeOrmModule.forFeature([Video]),

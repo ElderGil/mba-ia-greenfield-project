@@ -7,6 +7,7 @@ import { type FindOptionsWhere, LessThan, MoreThan, Repository } from 'typeorm';
 import videoConfig from '../config/video.config';
 import { S3StorageService } from '../storage/s3-storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
+import { redactUrls } from './media-processor.service';
 import {
   processVideoJobId,
   VIDEO_PROCESSING_QUEUE,
@@ -37,6 +38,12 @@ const LIVE_JOB_STATES = new Set([
  * - a video can stay in processing with no job (API stopped between the
  *   claim and the enqueue, or a job lost in Redis); past the threshold,
  *   and only if no live job exists, it is marked failed.
+ *
+ * A multipart session that outlives its row (process stopped between the
+ * database and S3 calls) is left to the storage's own expiry of incomplete
+ * uploads: S3-compatible stores cannot list a bucket's sessions reliably
+ * (MinIO requires the exact object name), and only a conditional claim on
+ * the row may abort a session a row still references.
  */
 @Injectable()
 export class VideoMaintenanceService {
@@ -86,7 +93,7 @@ export class VideoMaintenanceService {
       } catch (err) {
         // Background task: keep the row so the next sweep retries it.
         this.logger.warn(
-          `Could not remove stale draft ${draft.id}: ${(err as Error).message}`,
+          `Could not remove stale draft ${draft.id}: ${redactUrls((err as Error).message)}`,
         );
       }
     });

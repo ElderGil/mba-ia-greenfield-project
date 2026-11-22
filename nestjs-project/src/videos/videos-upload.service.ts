@@ -9,9 +9,7 @@ import {
   TooManyOpenUploadsException,
   UnsupportedMediaTypeException,
   UploadLimitExceededException,
-  VideoAccessDeniedException,
   VideoInvalidStateException,
-  VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import videoConfig from '../config/video.config';
 import {
@@ -22,6 +20,7 @@ import {
 } from '../storage/s3-storage.service';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
 import { Video, VideoStatus } from './entities/video.entity';
+import { findOwnedVideo } from './video-ownership';
 import { generateShortCode } from './short-code.util';
 import { VideosQueueService } from './videos-queue.service';
 import {
@@ -402,7 +401,7 @@ export class VideosUploadService {
     channelId: string,
     dto: InitiateUploadDto,
   ): Promise<Video> {
-    for (let attempt = 0; attempt < MAX_SHORT_CODE_RETRIES; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       const entity = this.videoRepository.create({
         channel_id: channelId,
         short_code: generateShortCode(),
@@ -418,38 +417,25 @@ export class VideosUploadService {
       } catch (err) {
         if (
           isPgUniqueViolationOnShortCode(err) &&
-          attempt < MAX_SHORT_CODE_RETRIES - 1
+          attempt < MAX_SHORT_CODE_RETRIES
         ) {
           continue;
         }
         throw err;
       }
     }
-
-    throw new Error(
-      'Could not allocate a unique video short code after maximum retries',
-    );
   }
 
   private async requireOwnedDraftVideo(
     userId: string,
     videoId: string,
   ): Promise<Video> {
-    const channel = await this.channelsService.findByUserId(userId);
-    if (!channel) {
-      throw new ChannelNotFoundException();
-    }
-
-    const video = await this.videoRepository.findOne({
-      where: { id: videoId },
-    });
-    if (!video) {
-      throw new VideoNotFoundException();
-    }
-
-    if (video.channel_id !== channel.id) {
-      throw new VideoAccessDeniedException();
-    }
+    const video = await findOwnedVideo(
+      this.videoRepository,
+      this.channelsService,
+      userId,
+      videoId,
+    );
 
     if (
       video.status !== VideoStatus.DRAFT ||

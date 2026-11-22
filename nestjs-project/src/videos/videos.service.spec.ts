@@ -29,7 +29,7 @@ describe('VideosService', () => {
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     const module = await Test.createTestingModule({
       providers: [
         VideosService,

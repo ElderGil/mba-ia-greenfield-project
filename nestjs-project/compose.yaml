@@ -78,6 +78,13 @@ services:
     environment:
       - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID:-minioadmin}
       - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY:-minioadmin}
+      # Incomplete multipart uploads older than 24h are expired by the storage
+      # itself (the defaults, pinned so the dependency is visible). This
+      # removes sessions no draft references any more; the app cannot list
+      # them (MinIO lists multipart uploads by exact key). The clock is
+      # independent of VIDEO_DRAFT_TTL_HOURS (24): raise both together.
+      - MINIO_API_STALE_UPLOADS_EXPIRY=24h
+      - MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL=6h
     volumes:
       - minio_data:/data
     healthcheck:

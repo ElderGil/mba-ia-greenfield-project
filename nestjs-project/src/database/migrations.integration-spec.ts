@@ -1,17 +1,13 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
-import { User } from '../users/entities/user.entity';
-import { Channel } from '../channels/entities/channel.entity';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
-import { Video } from '../videos/entities/video.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
 import { CreateVideos1794877024750 } from './migrations/1794877024750-CreateVideos';
 import { DropRedundantVideosChannelIndex1795194064003 } from './migrations/1795194064003-DropRedundantVideosChannelIndex';
 import { createTestDataSource } from '../test/create-test-data-source';
 import { assertTestDatabase } from '../test/test-database';
+import { ALL_ENTITIES } from '../test/test-entities';
 
 const MANAGED_TABLES = [
   'videos',
@@ -71,10 +67,9 @@ describe('Database migrations (integration)', () => {
   }
 
   beforeAll(async () => {
-    dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken, Video],
-      { migrations: ALL_MIGRATIONS },
-    );
+    dataSource = createTestDataSource(ALL_ENTITIES, {
+      migrations: ALL_MIGRATIONS,
+    });
 
     await dataSource.initialize();
     // This spec drops the whole schema.

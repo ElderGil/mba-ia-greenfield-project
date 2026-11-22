@@ -1,55 +1,46 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
-import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
-import { buildSwaggerConfig } from '../src/swagger/swagger-document';
+import { configureApp } from '../src/app.setup';
+import { setupSwagger } from '../src/swagger/swagger-document';
 
-async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
+async function createApp(): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
 
-  const app = moduleFixture.createNestApplication<INestApplication<App>>();
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-  app.useGlobalFilters(
-    new DomainExceptionFilter(),
-    new ValidationExceptionFilter(),
-  );
+  const app = moduleFixture.createNestApplication<NestExpressApplication>();
+  configureApp(app);
 
-  if (withSwagger) {
-    const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
-    SwaggerModule.setup('api/docs', app, document, {
-      customSiteTitle: 'StreamTube API Docs',
-      swaggerOptions: { persistAuthorization: true },
-    });
-  }
-
+  await setupSwagger(app);
   await app.init();
   return app;
 }
 
 describe('Swagger endpoints (e2e)', () => {
+  const originalSwaggerEnabled = process.env.SWAGGER_ENABLED;
+
+  afterAll(() => {
+    if (originalSwaggerEnabled === undefined) {
+      delete process.env.SWAGGER_ENABLED;
+    } else {
+      process.env.SWAGGER_ENABLED = originalSwaggerEnabled;
+    }
+  });
+
   describe('when SWAGGER_ENABLED=true', () => {
     let app: INestApplication<App>;
 
     beforeAll(async () => {
       process.env.SWAGGER_ENABLED = 'true';
-      app = await createApp(true);
+      app = await createApp();
     });
 
     afterAll(async () => {
       await app.close();
-      delete process.env.SWAGGER_ENABLED;
     });
 
     it('GET /api/docs returns 200 with HTML containing the custom title', async () => {
@@ -77,6 +68,10 @@ describe('Swagger endpoints (e2e)', () => {
       ).toMatchObject({
         'access-token': { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       });
+      expect(doc.components).toHaveProperty(
+        'schemas.ApiErrorEnvelope.type',
+        'object',
+      );
     });
 
     it('GET /api/docs-yaml returns 200 with YAML content', async () => {
@@ -87,12 +82,12 @@ describe('Swagger endpoints (e2e)', () => {
     });
   });
 
-  describe('when SWAGGER_ENABLED is not set', () => {
+  describe('when SWAGGER_ENABLED is disabled', () => {
     let app: INestApplication<App>;
 
     beforeAll(async () => {
-      delete process.env.SWAGGER_ENABLED;
-      app = await createApp(false);
+      process.env.SWAGGER_ENABLED = 'false';
+      app = await createApp();
     });
 
     afterAll(async () => {

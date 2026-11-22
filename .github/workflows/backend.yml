@@ -1,0 +1,96 @@
+# Backend gate: the Definition of Done (nestjs-project/CLAUDE.md) plus the
+# checks that guard the development data, run in the same Compose stack the
+# project uses locally. Everything runs inside the nestjs-api container.
+name: backend
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'nestjs-project/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'nestjs-project/**'
+      - '.github/workflows/backend.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: nestjs-project
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare the environment
+        # The container runs as `node` (uid 1000) on the runner's checkout.
+        run: |
+          cp .env.example .env
+          chmod -R a+rwX .
+
+      - name: Start the stack
+        # video-worker is left out: the e2e suite runs WorkerModule in-process.
+        run: docker compose up -d --build --wait db mailpit minio redis nestjs-api
+
+      - name: Install dependencies
+        run: docker compose exec -T nestjs-api npm ci
+
+      - name: Migrate the development database and plant canaries
+        run: |
+          docker compose exec -T nestjs-api npm run migration:run
+          docker compose exec -T db psql -U streamtube -d streamtube -c \
+            "INSERT INTO users (email, password, is_confirmed) VALUES ('ci-canary@example.com', 'x', true)"
+          docker compose exec -T nestjs-api curl -sf -X POST http://mailpit:8025/api/v1/send \
+            -H 'content-type: application/json' \
+            -d '{"From":{"Email":"ci@example.com"},"To":[{"Email":"ci-canary@example.com"}],"Subject":"canary","Text":"canary"}'
+
+      - name: Type-check
+        run: docker compose exec -T nestjs-api npx tsc --noEmit
+
+      - name: Lint (no auto-fix)
+        run: docker compose exec -T nestjs-api npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Unit and integration tests
+        run: docker compose exec -T nestjs-api npm test
+
+      - name: End-to-end tests
+        run: docker compose exec -T nestjs-api npm run test:e2e
+
+      - name: Build
+        run: docker compose exec -T nestjs-api npm run build
+
+      - name: openapi.json matches the code
+        run: |
+          docker compose exec -T nestjs-api npm run openapi:export
+          git diff --exit-code -- openapi.json
+
+      - name: The suites left the development data alone
+        run: |
+          users=$(docker compose exec -T db psql -U streamtube -d streamtube -Atc \
+            "SELECT count(*) FROM users WHERE email = 'ci-canary@example.com'")
+          test "$users" = "1" || { echo "development database was modified"; exit 1; }
+          migrations=$(docker compose exec -T nestjs-api npm run typeorm -- migration:show \
+            -d src/database/data-source.ts)
+          grep -q '^\[X\]' <<< "$migrations" || { echo "No applied migrations reported"; exit 1; }
+          if grep -q '^\[ \]' <<< "$migrations"; then
+            echo "Development migrations are pending"
+            exit 1
+          fi
+          mails=$(docker compose exec -T nestjs-api curl -sf \
+            'http://mailpit:8025/api/v1/search?query=to:%22ci-canary@example.com%22' \
+            | sed -E 's/.*"messages_count":([0-9]+).*/\1/')
+          test "$mails" = "1" || { echo "Mailpit inbox was wiped"; exit 1; }
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200

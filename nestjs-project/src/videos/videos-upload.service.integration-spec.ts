@@ -5,12 +5,10 @@ import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { UploadLimitExceededException } from '../common/exceptions/domain.exception';
-import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import {
   InvalidUploadPartsException,
   VideoInvalidStateException,
 } from '../common/exceptions/domain.exception';
-import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsModule } from '../channels/channels.module';
 import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
@@ -22,6 +20,8 @@ import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
 import { deferred, settled } from '../test/deferred';
+import { ALL_ENTITIES } from '../test/test-entities';
+import { TestMultipartUploads } from '../test/test-multipart-uploads';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from './entities/video.entity';
 import {
@@ -41,6 +41,7 @@ describe('VideosUploadService (integration)', () => {
   let videoRepo: Repository<Video>;
   let queue: Queue<VideoProcessingJobData>;
   const createdKeys: string[] = [];
+  const multipartUploads = new TestMultipartUploads();
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
@@ -58,7 +59,7 @@ describe('VideosUploadService (integration)', () => {
             username: dbCfg.username,
             password: dbCfg.password,
             database: dbCfg.name,
-            entities: [User, Channel, RefreshToken, VerificationToken, Video],
+            entities: ALL_ENTITIES,
           }),
         }),
         TypeOrmModule.forFeature([Video]),
@@ -100,6 +101,11 @@ describe('VideosUploadService (integration)', () => {
   });
 
   let counter = 0;
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await multipartUploads.abortRemaining(storageService);
+  });
+
   async function createOwner(): Promise<{ user: User; channel: Channel }> {
     const idx = ++counter;
     const user = await userRepo.save(
@@ -123,6 +129,7 @@ describe('VideosUploadService (integration)', () => {
       mimeType: 'video/mp4',
       sizeBytes: payload.length,
     });
+    multipartUploads.track(init);
     createdKeys.push(init.storageKey);
 
     expect(init.status).toBe(VideoStatus.DRAFT);
@@ -173,6 +180,7 @@ describe('VideosUploadService (integration)', () => {
       mimeType: 'video/mp4',
       sizeBytes: total,
     });
+    multipartUploads.track(init);
     createdKeys.push(init.storageKey);
     const uploaded: { partNumber: number; etag: string }[] = [];
     for (const [i, body] of parts.entries()) {
@@ -244,6 +252,7 @@ describe('VideosUploadService (integration)', () => {
       mimeType: 'video/mp4',
       sizeBytes: payload.length,
     });
+    multipartUploads.track(init);
     createdKeys.push(init.storageKey);
     const signed = await uploadService.signUploadPart(userId, init.videoId, 1);
     const putRes = await fetch(signed.presignedUrl, {
@@ -324,6 +333,7 @@ describe('VideosUploadService (integration)', () => {
       sizeBytes: 1024,
     });
 
+    multipartUploads.track(init);
     await uploadService.abortUpload(user.id, init.videoId);
 
     const gone = await videoRepo.findOneBy({ id: init.videoId });
@@ -341,6 +351,7 @@ describe('VideosUploadService (integration)', () => {
         contentType,
       );
       created = { key, uploadId };
+      multipartUploads.track({ storageKey: key, uploadId });
       return uploadId;
     });
     // First save creates the draft; the one recording the upload fails.
@@ -388,6 +399,7 @@ describe('VideosUploadService (integration)', () => {
         mimeType: 'video/mp4',
         sizeBytes: 1000,
       });
+      multipartUploads.track(init);
       createdKeys.push(init.storageKey);
       const signed = await uploadService.signUploadPart(
         user.id,
