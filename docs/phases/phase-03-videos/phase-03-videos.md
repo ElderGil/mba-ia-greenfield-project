@@ -567,6 +567,7 @@ Inherits standard error envelope from `phase-02-auth/TD-07`: `{ statusCode: numb
 | `INVALID_UPLOAD_PARTS` | 400 | Duplicate or S3-rejected multipart upload parts on complete (empty lists fail validation; unsorted lists are sorted, not rejected) |
 | `INVALID_RANGE` | 416 | Malformed or unsatisfiable HTTP `Range` header on `/stream` (response carries `Content-Range: bytes */size`) |
 | _(throttler)_ | 429 | More than 10 `POST /videos/uploads/initiate` per minute (_Revised 2026-11-21 (round 6): counted per authenticated user; the body is Nest's default, documented as `ApiHttpError`_) |
+| _(body parser)_ | 413 | _Revised 2026-11-21 (round 7):_ JSON body above the route's limit (1 MB on `complete`, 100 kB elsewhere). Emitted by the parser before validation, so the body is Nest's default `{ statusCode, message }` (`ApiHttpError`), not this envelope: `initiate` and `complete` document both shapes (`anyOf`, since they also raise `UPLOAD_LIMIT_EXCEEDED`), `parts` only `ApiHttpError` |
 
 ---
 

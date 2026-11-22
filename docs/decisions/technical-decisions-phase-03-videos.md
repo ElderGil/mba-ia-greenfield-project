@@ -85,6 +85,8 @@ _Subprojects in scope:_
 
 > **Revision (2026-11-20, round 5):** same decision. Complete, abort and the sweep claim a draft with one conditional UPDATE on `(id, draft, upload_id)` before any destructive storage call, so exactly one of them owns the multipart upload; a complete that gets `NoSuchUpload` checks the object under its immutable key (an earlier complete whose response was lost) before failing. Before assembly, complete sums the stored parts (`ListParts`) and aborts above the limit; the presigned `PUT` itself still cannot cap a part (S3 accepts up to 5 GiB per part). A real 10 GiB upload (1 024 parts of 10 MiB) was run end to end.
 
+> **Revision (2026-11-21, round 7):** same decision. A multipart session no row references (process stopped between the database and S3 calls) is expired by the storage, not by the app: `MINIO_API_STALE_UPLOADS_EXPIRY=24h` on Silo/MinIO (pinned in `compose.yaml`, equal to the draft TTL), an `AbortIncompleteMultipartUpload` lifecycle rule on S3. An app sweep over `ListMultipartUploads` was tried in round 6 and removed: MinIO lists multipart uploads only by exact object name (the pinned Silo returned none after a restart), and aborting without the row claim raced with complete. Every abort the app issues follows the claim above.
+
 **Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
