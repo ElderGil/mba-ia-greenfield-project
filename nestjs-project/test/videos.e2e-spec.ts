@@ -92,8 +92,8 @@ describe('Videos (e2e)', () => {
     await app.init();
 
     // The real worker processes the videos; the maintenance scheduler is
-    // replaced because its sweep would list the shared test bucket and abort
-    // sessions left by other runs. VideoMaintenanceService has its own suite.
+    // replaced so a sweep on worker init cannot change rows while a case
+    // runs. VideoMaintenanceService has its own suite.
     const workerFixture = await Test.createTestingModule({
       imports: [WorkerModule],
     })

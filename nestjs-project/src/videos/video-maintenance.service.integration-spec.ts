@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
@@ -12,10 +11,7 @@ import databaseConfig from '../config/database.config';
 import queueConfig, { bullRootOptions } from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import videoConfig from '../config/video.config';
-import {
-  type IncompleteUpload,
-  S3StorageService,
-} from '../storage/s3-storage.service';
+import { S3StorageService } from '../storage/s3-storage.service';
 import { StorageModule } from '../storage/storage.module';
 import { cleanAllTables } from '../test/create-test-data-source';
 import { deferred, settled } from '../test/deferred';
@@ -101,19 +97,6 @@ describe('VideoMaintenanceService (integration)', () => {
   beforeEach(async () => {
     await cleanAllTables(dataSource);
     await queue.obliterate({ force: true });
-    // The multipart pass lists the whole shared test bucket. Each case only
-    // sees the sessions it tracked, so uploads left by earlier or concurrent
-    // runs are never aborted by these suites.
-    const listUploads = storageService.listIncompleteUploads.bind(
-      storageService,
-    ) as S3StorageService['listIncompleteUploads'];
-    jest
-      .spyOn(storageService, 'listIncompleteUploads')
-      .mockImplementation(async function* (prefix) {
-        for await (const upload of listUploads(prefix)) {
-          if (multipartUploads.owns(upload.uploadId)) yield upload;
-        }
-      });
   });
 
   afterEach(async () => {
@@ -178,106 +161,30 @@ describe('VideoMaintenanceService (integration)', () => {
     expect(put.status).toBe(404);
   });
 
-  it('removes an old unclaimed upload and preserves a multipart attached to processing', async () => {
-    const owner = await createOwnerId();
-    const active = await initiate(owner);
-    const orphanKey = `videos/${randomUUID()}/${randomUUID()}/original.mp4`;
-    const orphanId = await storageService.createMultipartUpload(
-      orphanKey,
-      'video/mp4',
-    );
-    multipartUploads.track({ storageKey: orphanKey, uploadId: orphanId });
-
-    await videoRepo.update(
-      { id: active.videoId },
-      { status: VideoStatus.PROCESSING },
-    );
-    await queue.add(
-      'process-video',
-      { videoId: active.videoId },
-      { jobId: `process-video-${active.videoId}` },
-    );
-
-    // A future clock makes both tracked sessions older than the TTL.
-    await maintenance.sweep(new Date(Date.now() + 25 * 3_600_000));
-    await expect(
-      storageService.listUploadedParts(orphanKey, orphanId),
-    ).rejects.toMatchObject({ name: 'NoSuchUpload' });
-    await expect(
-      storageService.listUploadedParts(active.storageKey, active.uploadId),
-    ).resolves.toEqual([]);
-  });
-
-  it('leaves multipart sessions it did not create in the shared test bucket', async () => {
-    // Stands in for a session left by another run: matching key layout, no
-    // row, and old enough for the sweep once the clock moves 25 h ahead.
-    const externalKey = `videos/${randomUUID()}/${randomUUID()}/original.mp4`;
-    const externalId = await storageService.createMultipartUpload(
-      externalKey,
-      'video/mp4',
-    );
-    try {
-      await maintenance.sweep(new Date(Date.now() + 25 * 3_600_000));
-      await expect(
-        storageService.listUploadedParts(externalKey, externalId),
-      ).resolves.toEqual([]);
-    } finally {
-      await storageService.abortMultipartUpload(externalKey, externalId);
-    }
-  });
-
-  it('keeps an old multipart session that a live draft still owns', async () => {
-    const owner = await createOwnerId();
-    const draft = await initiate(owner);
-    // The draft row is fresh, so only the S3 pass can reach this session.
-    jest
-      .spyOn(storageService, 'listIncompleteUploads')
-      .mockImplementation(async function* () {
-        yield* await Promise.resolve([
-          {
-            key: draft.storageKey,
-            uploadId: draft.uploadId,
-            initiated: new Date(0),
-          },
-        ]);
-      });
-
-    await maintenance.sweep(new Date());
-
-    await expect(
-      storageService.listUploadedParts(draft.storageKey, draft.uploadId),
-    ).resolves.toEqual([]);
-    expect(await videoRepo.findOneBy({ id: draft.videoId })).not.toBeNull();
-  });
-
-  it('logs the cause and keeps the row results when the multipart listing fails', async () => {
+  it('logs a redacted cause and keeps the draft when its abort fails', async () => {
     const owner = await createOwnerId();
     const stale = await initiate(owner);
     await age(stale.videoId, 'created_at', '25 hours');
     jest
-      .spyOn(storageService, 'listIncompleteUploads')
-      .mockImplementation(async function* () {
-        const page: IncompleteUpload[] = await Promise.reject(
-          new Error(
-            'AccessDenied: s3:ListBucketMultipartUploads at http://minio:9000/streamtube-media-test?uploads&X-Amz-Signature=deadbeef',
-          ),
-        );
-        yield* page;
-      });
+      .spyOn(storageService, 'abortMultipartUpload')
+      .mockRejectedValue(
+        new Error(
+          'AccessDenied at http://minio:9000/streamtube-media-test?uploadId=1&X-Amz-Signature=deadbeef',
+        ),
+      );
     const warn = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
 
     await expect(maintenance.sweep(new Date())).resolves.toEqual({
-      abortedDrafts: 1,
+      abortedDrafts: 0,
       failedOrphans: 0,
     });
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('AccessDenied: s3:ListBucketMultipartUploads'),
-    );
     const logged = warn.mock.calls.map(([message]) => String(message)).join();
-    expect(logged).toContain('<url>');
+    expect(logged).toContain('AccessDenied at <url>');
     expect(logged).not.toContain('X-Amz-Signature');
+    const kept = await videoRepo.findOneByOrFail({ id: stale.videoId });
+    expect(kept.upload_id).toBe(stale.uploadId);
   });
 
   it('fails processing videos stuck past the threshold without a live job and leaves the rest alone', async () => {
